@@ -17,9 +17,9 @@ def simple_gradient_ascend(parameter, parameter_gradient, learning_rate=.1):
     return (parameter, parameter + learning_rate * parameter_gradient)
 
 def clip(gradient, bound):
-	"""
-	will work for bound > 0
-	"""
+    """
+    will work for bound > 0
+    """
     assert bound > 0
     return T.clip(gradient, -bound, bound)
 
@@ -46,3 +46,13 @@ def nesterov_rmsprop(parameter, parameter_gradient, learning_rate, momentum, fud
     parameter_update = parameter, parameter + grad_step
     ratio = grad_step.norm(2) / parameter.norm(2)
     return (memory_update, parameter_update, (rmsprop_moving_avg,  next_rmsprop_avg)), ratio
+
+def adagrad(parameter, parameter_gradient, learning_rate=.05, fudge_factor=1e-10, clip_threshold=1):
+    clipped_gradient = T.clip(parameter_gradient, -clip_threshold, clip_threshold)
+    adagrad_historical = theano.shared(np.zeros(parameter.get_value().shape, dtype=floatX), "adagrad_historical")
+    next_adagrad = adagrad_historical + T.pow(clipped_gradient, 2)
+    adagrad_update = adagrad_historical, next_adagrad
+    update = learning_rate / T.sqrt(fudge_factor + next_adagrad) * clipped_gradient
+    parameter_update = parameter, parameter + update
+    ratio = update.norm(2) / parameter.norm(2)
+    return (adagrad_update, parameter_update), ratio
