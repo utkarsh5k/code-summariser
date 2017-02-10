@@ -2,6 +2,8 @@ import theano.tensor as T
 import theano
 import numpy as np
 
+from collections import OrderedDict
+
 floatX = theano.config.floatX
 
 def logsumexp(x, y):
@@ -33,6 +35,17 @@ def rmsprop(parameter, parameter_gradient, learning_rate=.05, fudge_factor=1e-10
     ratio = grad_step.norm(2) / parameter.norm(2)
     return (update, parameter_update), ratio
 
+def rmsprop_multiple(parameters, parameter_gradients, learning_rate=.001, rho=.85, fudge_factor=1e-10, output_ratios=False):
+    updates = []
+    ratios = []
+    for parameter, gradient in zip(parameters, parameter_gradients):
+        update, ratio = rmsprop(parameter, clip(gradient, .1), learning_rate, fudge_factor, rho)
+        updates.extend(update)
+        ratios.append(ratio)
+    if output_ratios:
+        return updates, ratios
+    return updates
+
 def nesterov_rmsprop(parameter, parameter_gradient, learning_rate, momentum, fudge_factor=1e-10, rho=.9):
     memory = theano.shared(np.zeros_like(parameter.get_value(), dtype=floatX), name="nesterov_momentum")
     rmsprop_moving_avg = theano.shared(np.zeros(parameter.get_value().shape, dtype=floatX), "rmsprop_historical")
@@ -47,6 +60,18 @@ def nesterov_rmsprop(parameter, parameter_gradient, learning_rate, momentum, fud
     ratio = grad_step.norm(2) / parameter.norm(2)
     return (memory_update, parameter_update, (rmsprop_moving_avg,  next_rmsprop_avg)), ratio
 
+def nesterov_rmsprop_multiple(parameters, parameter_gradients, learning_rate=.001, momentum=.1, fudge_factor=1e-10,
+                              rho=.9, grad_clip=1., output_ratios=False):
+    updates = []
+    ratios = []
+    for parameter, gradient in zip(parameters, parameter_gradients):
+        update, ratio = nesterov_rmsprop(parameter, clip(gradient, grad_clip), learning_rate, momentum, fudge_factor, rho)
+        updates.extend(update)
+        ratios.append(ratio)
+    if output_ratios:
+        return updates, ratios
+    return updates
+
 def adagrad(parameter, parameter_gradient, learning_rate=.05, fudge_factor=1e-10, clip_threshold=1):
     clipped_gradient = T.clip(parameter_gradient, -clip_threshold, clip_threshold)
     adagrad_historical = theano.shared(np.zeros(parameter.get_value().shape, dtype=floatX), "adagrad_historical")
@@ -56,3 +81,15 @@ def adagrad(parameter, parameter_gradient, learning_rate=.05, fudge_factor=1e-10
     parameter_update = parameter, parameter + update
     ratio = update.norm(2) / parameter.norm(2)
     return (adagrad_update, parameter_update), ratio
+
+def adagrad_multiple(parameters, parameter_gradients, learning_rate=.05, fudge_factor=1e-10, output_ratios=False):
+    updates = []
+    ratios = []
+    for parameter, gradient in zip(parameters, parameter_gradients):
+        update, ratio = adagrad(parameter, gradient, learning_rate, fudge_factor)
+        updates.extend(update)
+        ratios.append(ratio)
+    if output_ratios:
+        return updates, ratios
+    return updates
+
