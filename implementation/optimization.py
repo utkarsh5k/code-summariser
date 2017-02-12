@@ -15,8 +15,17 @@ def dropout(dropout_rate, rng, parameter):
     mask = rng.binomial(parameter.shape, p=1.-dropout_rate, dtype=parameter.dtype)
     return parameter * mask / (1. - dropout_rate)
 
+def dropout_multiple(dropout_rate, rng, *parameters):
+    return tuple([dropout(dropout_rate, rng, p) for p in parameters])
+
 def simple_gradient_ascend(parameter, parameter_gradient, learning_rate=.1):
     return (parameter, parameter + learning_rate * parameter_gradient)
+
+def simple_gradient_ascend_multiple(parameters, parameter_gradients, learning_rate=.1):
+    updates = []
+    for parameter, gradient in zip(parameters, parameter_gradients):
+        updates.append(simple_gradient_ascend(parameter, gradient, learning_rate))
+    return updates
 
 def clip(gradient, bound):
     """
@@ -25,6 +34,10 @@ def clip(gradient, bound):
     assert bound > 0
     return T.clip(gradient, -bound, bound)
 
+"""
+RMSProp is an adaptive learning method for optimizing stochastic gradient descent algorithms. This method divides 
+the learning rate by an exponentially decaying average of squared gradients.
+"""
 def rmsprop(parameter, parameter_gradient, learning_rate=.05, fudge_factor=1e-10, rho=.9, clip_threshold=1):
     clipped_gradient = T.clip(parameter_gradient, -clip_threshold, clip_threshold)
     rmsprob_moving_avg = theano.shared(np.ones(parameter.get_value().shape, dtype=floatX) * 0, "rmsprop_historical")
@@ -46,6 +59,12 @@ def rmsprop_multiple(parameters, parameter_gradients, learning_rate=.001, rho=.8
         return updates, ratios
     return updates
 
+"""
+In simple terms, Nesterov's momentum performs a step of gradient ascent/descent, say from Xn to Yn+1, then slides
+it a little futher than Yn+1 in the direction given by previous point Yn.
+It takes into account the direction to move in, making it more 'intelligent' than simple gradient descent. This
+allows it to distinguish when a point of inflexion is at hand, and not going beyond it.
+"""
 def nesterov_rmsprop(parameter, parameter_gradient, learning_rate, momentum, fudge_factor=1e-10, rho=.9):
     memory = theano.shared(np.zeros_like(parameter.get_value(), dtype=floatX), name="nesterov_momentum")
     rmsprop_moving_avg = theano.shared(np.zeros(parameter.get_value().shape, dtype=floatX), "rmsprop_historical")
@@ -72,6 +91,10 @@ def nesterov_rmsprop_multiple(parameters, parameter_gradients, learning_rate=.00
         return updates, ratios
     return updates
 
+"""
+Adagrad adapts the learning rate to the parameters, performing larger updates for infrequent and smaller updates for
+frequent parameters. It performs a per-parameter update taking into account the importance (frequency) of the parameter.
+"""
 def adagrad(parameter, parameter_gradient, learning_rate=.05, fudge_factor=1e-10, clip_threshold=1):
     clipped_gradient = T.clip(parameter_gradient, -clip_threshold, clip_threshold)
     adagrad_historical = theano.shared(np.zeros(parameter.get_value().shape, dtype=floatX), "adagrad_historical")
