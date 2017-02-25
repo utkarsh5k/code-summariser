@@ -13,9 +13,9 @@ class FormatTokens:
     def __init__(self, names, code):
         self.name_dictionary = FeatureSet.make_feature_set(chain.from_iterable(names), 2)
         self.name_dictionary.id_from_token(self.NONE)
-
         self.all_tokens_dictionary = FeatureSet.make_feature_set(chain.from_iterable([chain.from_iterable(code), chain.from_iterable(names)]), 5)
         self.all_tokens_dictionary.id_from_token(self.NONE)
+        self.name_empirical_dist = self.__create_empirical_distribution(self.all_tokens_dictionary, chain.from_iterable(names))
 
     def __read_file(inp):
         with open(inp, 'r') as f:
@@ -65,3 +65,49 @@ class FormatTokens:
         empirical_dist = np.bincount(targets, minlength=len(records_dict)).astype(float)
         empirical_dist += alpha_dirichlet / len(empirical_dist)
         return empirical_dist / (np.sum(empirical_dist) + alpha_dirichlet)
+
+    """
+    took too long to figure out, clearly help taken
+    creating targets, context and ids for data
+    """
+    def __label_format(self, data, dictionary, cx_size):
+        targets = []
+        contexts = []
+        ids = []
+        for i, sequence in enumerate(data):
+            for j in xrange(1, len(sequence)): # First element always predictable
+                ids.append(i)
+                targets.append(dictionary.is_id_or_is_unknown(sequence[j]))
+                context = sequence[:j]
+                if len(context) < cx_size:
+                    context = [self.NONE] * (cx_size - len(context)) + context
+                else:
+                    context = context[-cx_size:]
+                assert len(context) == cx_size, (len(context), cx_size,)
+                contexts.append([dictionary.is_id_or_is_unknown(c) for c in context])
+        return np.array(targets, dtype=np.int32), np.array(contexts, dtype=np.int32), np.array(ids, np.int32)
+
+    """
+    return labeled tokens, labeled names and original names
+    """
+    def get_label_data(self, inp, code_cx_size, names_cx_size):
+        names, code, original_names = self.__read_file(inp)
+        return self.__label_format(names, self.name_dictionary, names_cx_size), self.__label_format(code, self.all_tokens_dictionary, code_cx_size), original_names
+
+    def validated_label_data(inp, code_cx_size, names_cx_size, percent_train):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        original_names = np.array(original_names, dtype=np.object)
+        limit = int(percent_train * len(names))
+        naming = FormatTokens(names[:limit], code[:limit])
+        """
+        explicit line joining necessary here
+        """
+        return naming.__label_format(names[:limit], naming.name_dictionary, names_cx_size), \
+               naming.__label_format(code[:limit], naming.all_tokens_dictionary, code_cx_size), original_names[:limit], \
+               naming.__label_format(names[limit:], naming.name_dictionary, names_cx_size), \
+               naming.__label_format(code[limit:], naming.all_tokens_dictionary, code_cx_size), original_names[limit:], naming
