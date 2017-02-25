@@ -2,6 +2,7 @@ from feature_set import feature_set
 import json
 from itertools import chain
 from collections import defaultdict
+import numpy as np
 
 class FormatTokens:
 
@@ -52,3 +53,15 @@ class FormatTokens:
                     id_tokens.append(subtoken)
             tags_code.append(id_tokens)
         return tags_code
+
+    """
+    scaling parameter to be used for dirichlet stochastic process, value determined by previous work
+    """
+    def __create_empirical_distribution(records_dict, records, alpha_dirichlet=10.):
+    	targets = np.array([records_dict.is_id_or_is_unknown(token) for token in record])
+    	"""
+    	number of occurences of each value in non-negative integer array
+    	"""
+        empirical_dist = np.bincount(targets, minlength=len(records_dict)).astype(float)
+        empirical_dist += alpha_dirichlet / len(empirical_dist)
+        return empirical_dist / (np.sum(empirical_dist) + alpha_dirichlet)
