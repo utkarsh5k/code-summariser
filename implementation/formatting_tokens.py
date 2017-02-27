@@ -96,6 +96,9 @@ class FormatTokens:
         return self.__label_format(names, self.name_dictionary, names_cx_size), self.__label_format(code, self.all_tokens_dictionary, code_cx_size), original_names
 
     def validated_label_data(inp, code_cx_size, names_cx_size, percent_train):
+        """
+        percentages cannot be less than 0 or greater than 1, can't believe this needs a check
+        """
         assert percent_train < 1
         assert percent_train > 0
         names, code, original_names = FormatTokens.__read_file(inp)
@@ -142,11 +145,24 @@ class FormatTokens:
                         id_xs.append(k)
                         id_ys.append(token_id)
                 k += 1
-
         code_features = sp.csr_matrix((np.ones(len(id_xs)), (id_xs, id_ys)), shape=(k, len(self.all_tokens_dictionary)), dtype=np.int32)
         name_targets = np.array(name_targets, dtype=np.int32)
         name_contexts = np.array(name_contexts, dtype=np.int32)
         original_names_ids = np.array(original_names_ids, dtype=np.int32)
         return name_targets, name_contexts, code_features, original_names_ids
 
+    def valid_forward_format_data(inp, names_cx_size, percent_train):
+        """
+        percentages cannot be less than 0 or greater than 1, can't believe this needs a check
+        """
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        original_names = np.array(original_names, dtype=np.object)
+        lim = int(percent_train * len(names))
+        naming = FormatTokens(names[:lim], code[:lim])
+        return naming.__forward_model_data(names[:lim], code[:lim], names_cx_size),\
+                naming.__forward_model_data(names[lim:], code[lim:], names_cx_size), naming
 
