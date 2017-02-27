@@ -1,6 +1,7 @@
 import theano
 from theano import tensor as T
 import numpy as np
+from optimization import nesterov_rmsprop_multiple
 
 floatX = theano.config.floatX
 
@@ -75,7 +76,116 @@ class ConvolutionalAttentionalModel(object):
             param.set_value(value)
         self.__compile_model_functions()
 
+    def __get_model_likelihood_for_sentence(self, sentence, name_contexts, name_target, do_dropout = False, dropout_rate = 0.5):
+        name_reps = self.name_cx_reps[name_contexts]
+        code_embeddings = self.all_name_reps[sentence]
 
+        if do_dropout:
+            #compute mask to disable neurons, use random values
+            #rng.binomial uses a bernoulli distribution whose output probability is uniformly distributed
+            mask = self.rng.binomial(code_embeddings.shape, p=1. - dropout_rate, dtype = code_embeddings.dtype)
+            code_embeddings *= mask / (1. - dropout_rate)
+
+            #initialise filters
+            conv_mask_code_l1 = self.rng.binomial(self.conv_layer1_code.shape, p=1.-dropout_rate, dtype = self.conv_layer1_code.dtype)
+            conv_weights_code_l1 = self.conv_layer1_code * conv_mask_code_l1 / (1. - dropout_rate)
+
+            conv_mask_name_l2 = self.rng.binomial(self.conv_layer2_name_cx.shape, p=1.-dropout_rate, dtype=self.conv_layer2_name_cx.dtype)
+            conv_weights_name_l2 = self.conv_layer2_name_cx * conv_mask_name_l2 / (1. - dropout_rate)
+
+
+            conv_mask_code_l2 = self.rng.binomial(self.conv_layer2_code.shape, p=1.-dropout_rate,dtype=self.conv_layer2_code.dtype)
+            conv_weights_code_l2 = self.conv_layer2_code * conv_mask_code_l2 / (1. - dropout_rate)
+
+            gate_mask_code_l2 = self.rng.binomial(self.gate_weights_code_l2.shape, p=1.-dropout_rate, dtype=self.gate_weights_code_l2.dtype)
+            gate_weights_code_l2 = self.gate_weights_code_l2 * gate_mask_code_l2 / (1. - dropout_rate)
+
+            conv_mask_code_l3 = self.rng.binomial(self.conv_layer3_code.shape, p=1.-dropout_rate, dtype=self.conv_layer3_code.dtype)
+            conv_weights_code_l3 = self.conv_layer3_code * conv_mask_code_l3 / (1. - dropout_rate)
+
+        else:
+            conv_weights_code_l1 = self.conv_layer1_code
+            conv_weights_name_l2 = self.conv_layer2_name_cx
+            gate_weights_code_l2 = self.gate_weights_code_l2
+            conv_weights_code_l2 = self.conv_layer2_code
+            conv_weights_code_l3 = self.conv_layer3_code
+
+        code_convolved_l1 = T.nnet.conv2d(code_embeddings.dimshuffle('x', 'x', 0, 1), conv_weights_code_l1, image_shape = (1, 1, None, self.D),
+                                          filter_shape = self.conv_layer1_code.get_value().shape)
+        l1_out = code_convolved_l1 + self.conv_layer1_bias.dimshuffle('x', 0, 'x', 'x')
+        l1_out = T.switch(l1_out > 0, l1_out, 0.1 * l1_out)
+
+        code_convolved_l2 = T.nnet.conv2d(l1_out, conv_weights_code_l2, image_shape = (1, self.hyperparameters["conv_layer1_nfilters"], None, 1),
+                                          filter_shape = self.conv_layer2_code.get_value().shape)
+        code_gate_l2 = T.nnet.conv2d(l1_out, gate_weights_code_l2, image_shape = (1, self.hyperparameters["conv_layer1_nfilters"], None, 1),
+                                          filter_shape = self.conv_layer2_code.get_value().shape)
+
+        name_gate_l2 = T.tensordot(name_reps, conv_weights_name_l2, [[0, 1], [2, 3]]).dimshuffle(0, 1, 'x', 'x')
+
+        l2_out = code_convolved_l2 + self.conv_layer2_bias.dimshuffle('x', 0, 'x', 'x')
+        gate_val = name_gate_l2 + code_gate_l2 + self.gate_layer2_bias.dimshuffle('x', 0, 'x', 'x')
+        l2_out *= T.switch(gate_val>0, gate_val, 0.01 * gate_val)
+        l2_out = l2_out / l2_out.norm(2)
+
+
+        code_convolved_l3 = T.nnet.conv2d(l2_out, conv_weights_code_l3,
+                                          image_shape = (1, self.hyperparameters["conv_layer2_nfilters"], None, 1),
+                                          filter_shape = self.conv_layer3_code.get_value().shape)[:, 0, :, 0]
+
+        l3_out = code_convolved_l3 + self.conv_layer3_bias
+        code_toks_weights = T.nnet.softmax(l3_out)  # 1D, must be == size of the sentence
+        # the first/last tokens are padding
+        padding_size = T.constant(self.hyperparameters["layer1_window_size"] + self.hyperparameters["layer2_window_size"] + self.hyperparameters["layer3_window_size"] - 3)
+
+        name_context_with_code_data = T.tensordot(code_toks_weights, code_embeddings[padding_size/2 + 1:-padding_size/2 + 1], [[1], [0]])
+        name_log_prob = T.log(T.nnet.softmax(T.dot(name_context_with_code_data, T.transpose(self.all_name_reps[:-1])) + self.name_bias))
+
+        target_name_log_probs = name_log_prob[0, name_target]
+        return sentence, name_contexts, name_target, name_log_prob, target_name_log_probs, name_context_with_code_data, code_toks_weights[0]
+
+    def __compile_model_functions(self):
+        grad_acc = [theano.shared(np.zeros(param.get_value().shape).astype(floatX) for param in self.train_parameters) \
+                    + [theano.shared(np.zeros(1, dtype=floatX)[0], name = "sentence_count")]
+
+        sentence = T.ivector("sentence")
+        name_context = T.ivector("name_context")
+        name_target = T.iscalar("name_target")
+        _, _, _, _, targets_log_prob, _, _ \
+                = self.__get_model_likelihood_for_sentence(sentence, name_context, name_target, do_dropout = True,
+                                                       dropout_rate = self.hyperparameters["dropout_rate"])
+
+        grad = T.grad(targets_log_prob, self.train_parameters)
+        outs = grad + [targets_log_prob]
+        self.grad_accumulate = theano.function(inputs = [name_context, sentence, name_target],
+                                               updates = [(v, v+g) for v, g in zip(grad_acc, grad)] + [(grad_acc[-1], grad_acc[-1]+1)],
+                                               outputs = outs)
+
+        normalized_grads = [T.switch(grad_acc[-1] > 0 , g / grad_acc[-1], g) for g in grad_acc[:-1]]
+        step_updates, ratios = nesterov_rmsprop_multiple(self.train_parameters, normalized_grads,
+                                                learning_rate = 10 ** self.hyperparameters["log_learning_rate"],
+                                                rho = self.hyperparameters["rmsprop_rho"],
+                                                momentum = self.hyperparameters["momentum"],
+                                                grad_clip = self.hyperparameters["grad_clip"],
+                                                output_ratios = True)
+        step_updates.extend([(v, T.zeros(v.shape,dtype=floatX)) for v in grad_acc[:-1]])  # Set accumulators to 0
+        step_updates.append((grad_acc[-1], T.zeros(1,dtype=floatX)))
+
+        self.grad_step = theano.function(inputs=[], updates=step_updates, outputs=ratios)
+
+        test_sentence, test_name_contexts, test_name_targets, test_name_log_prob, test_targets_log_probs, \
+        test_code_representation, test_code_weights = self.__get_model_likelihood_for_sentence(
+            T.ivector("sentence"),  T.ivector("name_context"), T.iscalar("name_target"), do_dropout = False)
+
+        self.__log_prob_with_targets = theano.function(inputs = [test_name_contexts, test_sentence, test_name_targets],
+                                                     outputs = test_targets_log_probs)
+
+        self.__log_prob = theano.function(inputs = [test_name_contexts, test_sentence],
+                                                     outputs = test_name_log_prob)
+
+        self.attention_weights = theano.function(inputs = [test_name_contexts, test_sentence],
+                                                 outputs = test_code_weights)
+
+        self.get_representation = theano.function(inputs = [test_name_contexts, test_sentence], outputs = test_code_representation)
 
 
     def log_prob_with_targets(self, name_contexts, sentence, name_targets):
