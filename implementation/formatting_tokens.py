@@ -166,3 +166,36 @@ class FormatTokens:
         return naming.__forward_model_data(names[:lim], code[:lim], names_cx_size),\
                 naming.__forward_model_data(names[lim:], code[lim:], names_cx_size), naming
 
+    def conv_data(self, names, code, name_cx_size, sentence_padding):
+        assert len(names) == len(code), (len(names), len(code), code.shape)
+        name_targets = []
+        name_contexts = []
+        original_names_ids = []
+        sentences = []
+        padding = [self.all_tokens_dictionary.is_id_or_is_unknown(self.NONE)]
+
+        for i, name in enumerate(names):
+            sentence = [self.all_tokens_dictionary.is_id_or_is_unknown(token) for token in code[i]]
+            if sentence_padding % 2 == 0:
+                sentence = padding * (sentence_padding / 2) + sentence + padding * (sentence_padding / 2)
+            else:
+                sentence = padding * (sentence_padding / 2 + 1) + sentence + padding * (sentence_padding / 2)
+            for j in xrange(1, len(name)):  # First element always predictable
+                name_targets.append(self.all_tokens_dictionary.is_id_or_is_unknown(name[j]))
+                original_names_ids.append(i)
+                context = name[:j]
+                if len(context) < name_cx_size:
+                    context = [self.NONE] * (name_cx_size - len(context)) + context
+                else:
+                    context = context[-name_cx_size:]
+                assert len(context) == name_cx_size, (len(context), name_cx_size,)
+                name_contexts.append([self.name_dictionary.is_id_or_is_unknown(token) for token in context])
+                sentences.append(np.array(sentence, dtype=np.int32))
+
+        name_targets = np.array(name_targets, dtype=np.int32)
+        name_contexts = np.array(name_contexts, dtype=np.int32)
+        sentences = np.array(sentences, dtype=np.object)
+        original_names_ids = np.array(original_names_ids, dtype=np.int32)
+        return name_targets, name_contexts, sentences, original_names_ids
+
+
