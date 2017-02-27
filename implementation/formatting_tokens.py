@@ -198,4 +198,8 @@ class FormatTokens:
         original_names_ids = np.array(original_names_ids, dtype=np.int32)
         return name_targets, name_contexts, sentences, original_names_ids
 
+    def data_in_conv_format(self, inp, name_cx_size, min_code_size):
+        names, code, original_names = self.__read_file(inp)
+        return self.conv_data(names, code, name_cx_size, min_code_size), original_names
+
 
