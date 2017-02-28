@@ -3,6 +3,7 @@ import json
 from itertools import chain
 from collections import defaultdict
 import numpy as np
+import scipy.sparse as sp
 
 class FormatTokens:
 
@@ -111,3 +112,41 @@ class FormatTokens:
                naming.__label_format(code[:limit], naming.all_tokens_dictionary, code_cx_size), original_names[:limit], \
                naming.__label_format(names[limit:], naming.name_dictionary, names_cx_size), \
                naming.__label_format(code[limit:], naming.all_tokens_dictionary, code_cx_size), original_names[limit:], naming
+
+    def forward_formatted_data(self, inp, name_cx_size):
+        names, code, original_names = self.__read_file(inp)
+        return self.__get_data_in_forward_format(names, code, name_cx_size), original_names
+
+    def __forward_model_data(self, names, code, name_cx_size):
+        assert len(names) == len(code), (len(names), len(code), code.shape)
+        name_targets = []
+        name_contexts = []
+        original_names_ids = []
+        id_xs = []
+        id_ys = []
+        k = 0
+        for i, name in enumerate(names):
+            for j in xrange(1, len(name)):  # First element always predictable
+                name_targets.append(self.name_dictionary.is_id_or_is_unknown(name[j]))
+                original_names_ids.append(i)
+                context = name[:j]
+                if len(context) < name_cx_size:
+                    context = [self.NONE] * (name_cx_size - len(context)) + context
+                else:
+                    context = context[-name_cx_size:]
+                assert len(context) == name_cx_size, (len(context), name_cx_size,)
+                name_contexts.append([self.name_dictionary.is_id_or_is_unknown(token) for token in context])
+                for code_token in set(code[i]):
+                    token_id = self.all_tokens_dictionary.is_id_or_is_none(code_token)
+                    if token_id is not None:
+                        id_xs.append(k)
+                        id_ys.append(token_id)
+                k += 1
+
+        code_features = sp.csr_matrix((np.ones(len(id_xs)), (id_xs, id_ys)), shape=(k, len(self.all_tokens_dictionary)), dtype=np.int32)
+        name_targets = np.array(name_targets, dtype=np.int32)
+        name_contexts = np.array(name_contexts, dtype=np.int32)
+        original_names_ids = np.array(original_names_ids, dtype=np.int32)
+        return name_targets, name_contexts, code_features, original_names_ids
+
+
