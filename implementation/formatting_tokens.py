@@ -151,7 +151,7 @@ class FormatTokens:
         original_names_ids = np.array(original_names_ids, dtype=np.int32)
         return name_targets, name_contexts, code_features, original_names_ids
 
-    def valid_forward_format_data(inp, names_cx_size, percent_train):
+    def validated_forward_format_data(inp, names_cx_size, percent_train):
         """
         percentages cannot be less than 0 or greater than 1, can't believe this needs a check
         """
@@ -165,4 +165,57 @@ class FormatTokens:
         naming = FormatTokens(names[:lim], code[:lim])
         return naming.__forward_model_data(names[:lim], code[:lim], names_cx_size),\
                 naming.__forward_model_data(names[lim:], code[lim:], names_cx_size), naming
+
+    def conv_data(self, names, code, name_cx_size, sentence_padding):
+        assert len(names) == len(code), (len(names), len(code), code.shape)
+        name_targets = []
+        name_contexts = []
+        original_names_ids = []
+        sentences = []
+        padding = [self.all_tokens_dictionary.is_id_or_is_unknown(self.NONE)]
+
+        for i, name in enumerate(names):
+            sentence = [self.all_tokens_dictionary.is_id_or_is_unknown(token) for token in code[i]]
+            if sentence_padding % 2 == 0:
+                sentence = padding * (sentence_padding / 2) + sentence + padding * (sentence_padding / 2)
+            else:
+                sentence = padding * (sentence_padding / 2 + 1) + sentence + padding * (sentence_padding / 2)
+            for j in xrange(1, len(name)):  # First element always predictable
+                name_targets.append(self.all_tokens_dictionary.is_id_or_is_unknown(name[j]))
+                original_names_ids.append(i)
+                context = name[:j]
+                if len(context) < name_cx_size:
+                    context = [self.NONE] * (name_cx_size - len(context)) + context
+                else:
+                    context = context[-name_cx_size:]
+                assert len(context) == name_cx_size, (len(context), name_cx_size,)
+                name_contexts.append([self.name_dictionary.is_id_or_is_unknown(token) for token in context])
+                sentences.append(np.array(sentence, dtype=np.int32))
+
+        name_targets = np.array(name_targets, dtype=np.int32)
+        name_contexts = np.array(name_contexts, dtype=np.int32)
+        sentences = np.array(sentences, dtype=np.object)
+        original_names_ids = np.array(original_names_ids, dtype=np.int32)
+        return name_targets, name_contexts, sentences, original_names_ids
+
+    def data_in_conv_format(self, inp, name_cx_size, min_code_size):
+        names, code, original_names = self.__read_file(inp)
+        return self.conv_data(names, code, name_cx_size, min_code_size), original_names
+
+    """
+    similar to the forward format data with validation method
+    """
+    def validated_conv_data(inp, names_cx_size, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
+                naming.conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
+
 
