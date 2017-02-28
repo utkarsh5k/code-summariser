@@ -151,7 +151,7 @@ class FormatTokens:
         original_names_ids = np.array(original_names_ids, dtype=np.int32)
         return name_targets, name_contexts, code_features, original_names_ids
 
-    def valid_forward_format_data(inp, names_cx_size, percent_train):
+    def validated_forward_format_data(inp, names_cx_size, percent_train):
         """
         percentages cannot be less than 0 or greater than 1, can't believe this needs a check
         """
@@ -201,5 +201,21 @@ class FormatTokens:
     def data_in_conv_format(self, inp, name_cx_size, min_code_size):
         names, code, original_names = self.__read_file(inp)
         return self.conv_data(names, code, name_cx_size, min_code_size), original_names
+
+    """
+    similar to the forward format data with validation method
+    """
+    def validated_conv_data(inp, names_cx_size, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
+                naming.conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
 
 
