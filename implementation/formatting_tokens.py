@@ -243,4 +243,20 @@ class FormatTokens:
         sentences = np.array(sentences, dtype=np.object)
         return name_targets, sentences
 
+    """
+    this is similar to any of the previous validation methods written, for forward format and for
+    convolution format
+    """
+    def validated_rec_conv_data(inp, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.rec_conv_data(names[idxs[:lim]], code[idxs[:lim]], min_code_size),\
+                naming.rec_conv_data(names[idxs[lim:]], code[idxs[lim:]], min_code_size), naming
 
