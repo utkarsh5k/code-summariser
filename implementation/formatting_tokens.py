@@ -218,4 +218,45 @@ class FormatTokens:
         return naming.conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
                 naming.conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
 
+    def data_in_rec_conv_format(self, input_file, min_code_size):
+        names, code, original_names = self.__read_file(input_file)
+        return self.rec_conv_data(names, code, min_code_size), original_names
+
+    """
+    looks similar to convolution data formatting, but it really isn't
+    """
+    def rec_conv_data(self, names, code, sentence_padding):
+        assert len(names) == len(code), (len(names), len(code), code.shape)
+        name_targets = []
+        sentences = []
+        padding = [self.all_tokens_dictionary.is_id_or_is_unknown(self.NONE)]
+        for i, name in enumerate(names):
+            sentence = [self.all_tokens_dictionary.is_id_or_is_unknown(token) for token in code[i]]
+            if sentence_padding % 2 == 0:
+                sentence = padding * (sentence_padding / 2) + sentence + padding * (sentence_padding / 2)
+            else:
+                sentence = padding * (sentence_padding / 2 + 1) + sentence + padding * (sentence_padding / 2)
+            name_tokens = [self.all_tokens_dictionary.is_id_or_is_unknown(token) for token in name]
+            name_targets.append(np.array(name_tokens, dtype=np.int32))
+            sentences.append(np.array(sentence, dtype=np.int32))
+        name_targets = np.array(name_targets, dtype=np.object)
+        sentences = np.array(sentences, dtype=np.object)
+        return name_targets, sentences
+
+    """
+    this is similar to any of the previous validation methods written, for forward format and for
+    convolution format
+    """
+    def validated_rec_conv_data(inp, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.rec_conv_data(names[idxs[:lim]], code[idxs[:lim]], min_code_size),\
+                naming.rec_conv_data(names[idxs[lim:]], code[idxs[lim:]], min_code_size), naming
 
