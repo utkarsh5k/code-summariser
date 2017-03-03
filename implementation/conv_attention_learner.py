@@ -114,3 +114,80 @@ class ConvolutionalAttentionalLearner:
             return attention_vector
 
     # To implement: run_from_config, main
+    def run_from_config(params, *args):
+        if len(args) < 2:
+            print "Invalid arguments!"
+            sys.exit(-1)
+
+        input_file = args[0]
+        test_file = args[1]
+        num_epochs = 1000
+        if len(args) > 2:
+            num_epochs = int(args[2])
+        params["D"] = 2 ** params["logD"]
+        params["conv_layer1_nfilters"] = 2 ** params["log_conv_layer1_nfilters"]
+        params["conv_layer2_nfilters"] = 2 ** params["log_conv_layer2_nfilters"]
+
+        model = ConvolutionalAttentionalLearner(params)
+        model.train(input_file, max_epochs=num_epochs)
+
+        test_data, original_names = model.naming_data.conv_data(test_file, model.name_cx_size, model.padding_size)
+        test_name_targets, test_name_contexts, test_code_sentences, test_original_name_ids = test_data
+        ids, unique_idx = np.unique(test_original_name_ids, return_index=True)
+
+        eval = F1Evaluator(model)
+        point_suggestion_eval = eval.compute_names(test_code_sentences[unique_idx], original_names,
+                                                      model2.naming_data.all_tokens_dictionary.get_all_names())
+        return -point_suggestion_eval.get_f1_at_all_ranks()[1]
+
+if __name__ == '__main__':
+    if len(sys.argv) < 5:
+        print 'Usage <input_file> <max_num_epochs> d <test_file>'
+        sys.exit(-1)
+
+    input_file = sys.argv[1]
+    max_num_epochs = int(sys.argv[2])
+    params = {
+        "D": int(sys.argv[3]),
+        "name_cx_size": 1,
+        "conv_layer1_nfilters": 64,
+        "conv_layer2_nfilters": 16,
+        "layer1_window_size": 6,
+        "layer2_window_size": 15,
+        "layer3_window_size": 14,
+        "log_code_rep_init_scale": -1.34,
+        "log_name_rep_init_scale": -4.9,
+        "log_layer1_init_scale": -1,
+        "log_layer2_init_scale": -3.4,
+        "log_layer3_init_scale": -1.8,
+        "log_name_cx_init_scale": -1.3,
+        "log_learning_rate": -2.95,
+        "rmsprop_rho": .98,
+        "momentum": 0.9,
+        "dropout_rate": 0.25,
+        "grad_clip":1
+    }
+
+    params["train_file"] = input_file
+    params["test_file"] = sys.argv[4]
+
+    model = ConvolutionalAttentionalLearner(params)
+
+    model.train(input_file, max_epochs=max_num_epochs)
+
+    model.save("convolutional_att_model" + os.path.basename(params["train_file"]) + ".pkl")
+
+    model2 = ConvolutionalAttentionalLearner.load("convolutional_att_model" + os.path.basename(params["train_file"]) + ".pkl")
+
+    test_data, original_names = model2.naming_data.conv_data(sys.argv[4], model2.name_cx_size, model2.padding_size)
+    test_name_targets, test_name_contexts, test_code_sentences, test_original_name_ids = test_data
+    name_ll = model2.model.log_prob_with_targets(test_name_contexts, test_code_sentences, test_name_targets)
+    print "Test name_ll=%s" % name_ll
+
+    ids, unique_idx = np.unique(test_original_name_ids, return_index=True)
+    eval = F1Evaluator(model2)
+    point_suggestion_eval = eval.compute_names(test_code_sentences[unique_idx], original_names,
+                                                  model2.naming_data.all_tokens_dictionary.get_all_names())
+    print point_suggestion_eval
+    results = point_suggestion_eval.get_f1_at_all_ranks()
+    print results
