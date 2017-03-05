@@ -218,8 +218,8 @@ class FormatTokens:
         return naming.conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
                 naming.conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
 
-    def data_in_rec_conv_format(self, input_file, min_code_size):
-        names, code, original_names = self.__read_file(input_file)
+    def data_in_rec_conv_format(self, inp, min_code_size):
+        names, code, original_names = self.__read_file(inp)
         return self.rec_conv_data(names, code, min_code_size), original_names
 
     """
@@ -305,4 +305,18 @@ class FormatTokens:
         copy_vector = np.array(copy_vector, dtype=np.object)
         target_is_unknown = np.array(target_is_unknown, dtype=np.int32)
         return name_targets, original_targets, name_contexts, sentences, original_code, copy_vector, target_is_unknown, original_names_ids
+
+    def validated_copy_conv_data(inp, names_cx_size, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.copy_conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
+                naming.copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
+
 
