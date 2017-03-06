@@ -218,8 +218,8 @@ class FormatTokens:
         return naming.conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
                 naming.conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
 
-    def data_in_rec_conv_format(self, input_file, min_code_size):
-        names, code, original_names = self.__read_file(input_file)
+    def data_in_rec_conv_format(self, inp, min_code_size):
+        names, code, original_names = self.__read_file(inp)
         return self.rec_conv_data(names, code, min_code_size), original_names
 
     """
@@ -259,4 +259,64 @@ class FormatTokens:
         naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
         return naming.rec_conv_data(names[idxs[:lim]], code[idxs[:lim]], min_code_size),\
                 naming.rec_conv_data(names[idxs[lim:]], code[idxs[lim:]], min_code_size), naming
+
+    def data_in_copy_conv_format(self, inp, name_cx_size, min_code_size):
+        names, code, original_names = self.__read_file(inp)
+        return self.copy_conv_data(names, code, name_cx_size, min_code_size), original_names
+
+    def copy_conv_data(self, names, code, name_cx_size, sentence_padding):
+        assert len(names) == len(code), (len(names), len(code), code.shape)
+        name_targets = []
+        original_targets = []
+        name_contexts = []
+        original_names_ids = []
+        sentences = []
+        original_code = []
+        copy_vector = []
+        target_is_unknown = []
+        padding = [self.all_tokens_dictionary.is_id_or_is_unknown(self.NONE)]
+
+        for i, name in enumerate(names):
+            sentence = [self.all_tokens_dictionary.is_id_or_is_unknown(token) for token in code[i]]
+            if sentence_padding % 2 == 0:
+                sentence = padding * (sentence_padding / 2) + sentence + padding * (sentence_padding / 2)
+            else:
+                sentence = padding * (sentence_padding / 2 + 1) + sentence + padding * (sentence_padding / 2)
+            for j in xrange(1, len(name)):  # First element always predictable like in convolution format
+                name_targets.append(self.all_tokens_dictionary.is_id_or_is_unknown(name[j]))
+                original_targets.append(name[j])
+                target_is_unknown.append(self.all_tokens_dictionary.is_unknown(name[j]))
+                original_names_ids.append(i)
+                context = name[:j]
+                if len(context) < name_cx_size:
+                    context = [self.NONE] * (name_cx_size - len(context)) + context
+                else:
+                    context = context[-name_cx_size:]
+                assert len(context) == name_cx_size, (len(context), name_cx_size,)
+                name_contexts.append([self.name_dictionary.is_id_or_is_unknown(token) for token in context])
+                sentences.append(np.array(sentence, dtype=np.int32))
+                original_code.append(code[i])
+                tokens_to_be_copied = [token == name[j] for token in code[i]]
+                copy_vector.append(np.array(tokens_to_be_copied, dtype=np.int32))
+        name_targets = np.array(name_targets, dtype=np.int32)
+        name_contexts = np.array(name_contexts, dtype=np.int32)
+        sentences = np.array(sentences, dtype=np.object)
+        original_names_ids = np.array(original_names_ids, dtype=np.int32)
+        copy_vector = np.array(copy_vector, dtype=np.object)
+        target_is_unknown = np.array(target_is_unknown, dtype=np.int32)
+        return name_targets, original_targets, name_contexts, sentences, original_code, copy_vector, target_is_unknown, original_names_ids
+
+    def validated_copy_conv_data(inp, names_cx_size, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.copy_conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
+                naming.copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
+
 
