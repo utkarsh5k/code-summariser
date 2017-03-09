@@ -8,6 +8,9 @@ import scipy.sparse as sp
 """
 most data formatting functions have lists being converted to numpy arrays since everything useful has
 to be converted to np objects for further use
+
+validation inclusive methods follow the same template for all data formats be it conv, rec, copy conv,
+or rec copy conv
 """
 
 class FormatTokens:
@@ -333,9 +336,9 @@ class FormatTokens:
         return naming.copy_conv_data(names[idxs[:lim]], code[idxs[:lim]], names_cx_size, min_code_size),\
                 naming.copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
 
-    def data_in_rec_copy_conv_format(self, input_file, min_code_size):
-        names, code, original_names = self.__get_file_data(input_file)
-        return self.get_data_for_recurrent_copy_convolution(names, code, min_code_size), original_names
+    def data_in_rec_copy_conv_format(self, inp, min_code_size):
+        names, code, original_names = self.__get_file_data(inp)
+        return self.rec_copy_conv_data(names, code, min_code_size), original_names
 
     def rec_copy_conv_data(self, names, code, sentence_padding):
         """
@@ -349,7 +352,6 @@ class FormatTokens:
         padding = [self.all_tokens_dictionary.is_id_or_is_unknown(self.NONE)]
         for i, name in enumerate(names):
             sentence = [self.all_tokens_dictionary.is_id_or_is_unknown(token) for token in code[i]]
-
             if sentence_padding % 2 == 0:
                 sentence = padding * (sentence_padding / 2) + sentence + padding * (sentence_padding / 2)
             else:
@@ -367,4 +369,17 @@ class FormatTokens:
         target_is_unknown = np.array(target_is_unknown, dtype=np.object)
         copy_vectors = np.array(copy_vectors, dtype=np.object)
         return name_targets, sentences, code, target_is_unknown, copy_vectors
+
+    def validated_rec_copy_conv_data(inp, percent_train, min_code_size):
+        assert percent_train < 1
+        assert percent_train > 0
+        names, code, original_names = FormatTokens.__read_file(inp)
+        names = np.array(names, dtype=np.object)
+        code = np.array(code, dtype=np.object)
+        lim = int(percent_train * len(names))
+        idxs = np.arange(len(names))
+        np.random.shuffle(idxs)
+        naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
+        return naming.rec_copy_conv_data(names[idxs[:lim]], code[idxs[:lim]], min_code_size),\
+                naming.rec_copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], min_code_size), naming
 
