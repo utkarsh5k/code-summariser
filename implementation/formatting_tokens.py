@@ -1,9 +1,10 @@
 from feature_set import feature_set
 import json
-from itertools import chain
+from itertools import chain, repeat
 from collections import defaultdict
 import numpy as np
 import scipy.sparse as sp
+import heapq
 
 """
 most data formatting functions have lists being converted to numpy arrays since everything useful has
@@ -382,4 +383,91 @@ class FormatTokens:
         naming = FormatTokens(names[idxs[:lim]], code[idxs[:lim]])
         return naming.rec_copy_conv_data(names[idxs[:lim]], code[idxs[:lim]], min_code_size),\
                 naming.rec_copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], min_code_size), naming
+
+    def possible_suggestions_from_name_prefix(self, next_name_log_probability, name_cx_size, max_predicted_id_size=5, max_steps=100):
+        """
+        A list of tuple of full suggestions (token, prob)
+        """
+        suggestions = defaultdict(lambda: float('-inf'))
+        """
+        A stack of partial suggestion in the form ([subword1, subword2, ...], logprob)
+        - list of subwords and their individual probabilities
+        """
+        possible_suggestions_stack = [([self.NONE] * (name_cx_size - 1) + [self.SUBTOKEN_START], [], 0)]
+        """
+        Keep the max_no_of_suggestions suggestion scores (sorted in the heap). 
+        Prune further exploration if something has already lower score
+        """
+        prediction_probabilities_heap = [float('-inf')]
+        max_no_of_suggestions = 20
+        nsteps = 0
+        while True:
+            scored_list = []
+            while len(possible_suggestions_stack) > 0:
+                subword_tokens = possible_suggestions_stack.pop()
+                """
+                If we're done, append to full suggestions
+                """
+                if subword_tokens[0][-1] == self.SUBTOKEN_END:
+                    final_prediction = tuple(subword_tokens[1][:-1])
+                    if len(final_prediction) == 0:
+                        continue
+                    suggestion_log_probability = np.logaddexp(suggestions[final_prediction], subword_tokens[2])
+                    if suggestion_log_probability > prediction_probabilities_heap[0] and not suggestion_log_probability == float('-inf'):
+                        """
+                        Push only if the score is better than the current minimum and > 0
+                        Remove extraneous entries
+                        """
+                        suggestions[final_prediction] = suggestion_log_probability
+                        heapq.heappush(prediction_probabilities_heap, suggestion_log_probability)
+                        if len(prediction_probabilities_heap) > max_no_of_suggestions:
+                            heapq.heappop(prediction_probabilities_heap)
+                    continue
+                elif len(subword_tokens[1]) > max_predicted_id_size:
+                    continue
+    
+                """
+                Convert subword context
+                """
+                context = [self.name_dictionary.is_id_or_is_unknown(k) for k in subword_tokens[0][-name_cx_size:]]
+                assert len(context) == name_cx_size
+                context = np.array([context], dtype=np.int32)
+    
+                """
+                Predict next subwords
+                """
+                target_subword_log_probabilities = next_name_log_probability(context)
+    
+                def list_possible_options(name_id):
+                    subword_name = self.all_tokens_dictionary.token_from_id(name_id)
+                    if subword_name == self.all_tokens_dictionary.get_unknown():
+                        subword_name = "***"
+                    name = subword_tokens[1] + [subword_name]
+                    return subword_tokens[0][1:] + [subword_name], name, target_subword_log_probabilities[0, name_id] + \
+                           subword_tokens[2]
+
+                top_indices = np.argsort(-target_subword_log_probabilities[0])
+                possible_options = [list_possible_options(top_indices[i]) for i in xrange(max_no_of_suggestions)]
+                """
+                Remove suggestions that contain duplicate subtokens
+                """
+                scored_list.extend(filter(lambda x: len(x[1])==1 or x[1][-1] != x[1][-2], possible_options))
+            """
+            Prune
+            """
+            scored_list = filter(lambda suggestion: suggestion[2] >= prediction_probabilities_heap[0] and suggestion[2] >= float('-inf'), scored_list)
+            scored_list.sort(key=lambda entry: entry[2], reverse=True)
+            """
+            Update
+            """
+            possible_suggestions_stack = scored_list[:max_no_of_suggestions]
+            nsteps += 1
+            if nsteps >= max_steps:
+                break
+        """
+        Sort and append to final predictions
+        """
+        suggestions = [(identifier, np.exp(logprob)) for identifier, logprob in suggestions.items()]
+        suggestions.sort(key=lambda entry: entry[1], reverse=True)
+        return suggestions
 
