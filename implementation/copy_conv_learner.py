@@ -3,9 +3,12 @@ import sys
 import re
 import time
 import cPickle
+import logging
+import heapq
 
 from collections import defaultdict
 from math import ceil
+from experimenter import ExperimentLogger
 
 import numpy as np
 
@@ -60,7 +63,7 @@ class CopyAttentionalLearner:
                 n_batches += 1
             sys.stdout.write("|")
             if i % 1 == 0:
-                name_ll = compute_validation_logprob()
+                name_ll = log_probablity_for_validation()
                 if name_ll > best_name_score:
                     best_name_score = name_ll
                     best_params = [p.get_value() for p in model.train_parameters]
@@ -99,4 +102,208 @@ class CopyAttentionalLearner:
             learner = cPickle.load(f)
         learner.model = CopyConvolutionalAttentionalModel(learner.hyperparameters, len(learner.naming_data.all_tokens_dictionary), len(learner.naming_data.name_dictionary), learner.naming_data.name_empirical_dist)
         learner.model.restore_parameters(learner.parameters)
-        return learner
+
+    def evaluate_decision_accuracy(self, inp):
+        test_data, original_names = self.naming_data.data_in_copy_conv_format(inp, self.name_cx_size, self.padding_size)
+        name_targets, original_targets, name_contexts, code_sentences, code, copy_vectors, target_is_unk, original_name_ids = test_data
+
+        num_suggestion_points = 0
+        num_correct_suggestions_r1 = 0
+        num_correct_suggestions_r5 = 0
+
+        for i in xrange(len(name_targets)):
+            current_code = code[i]
+            current_code_sentence = code_sentences[i]
+            current_name_contexts = name_contexts[i]
+            copy_prob, copy_word, suggestions, subtoken_target_logprob = self.get_suggestions_for_next_subtoken(current_code, current_code_sentence, current_name_contexts)
+
+            if original_targets[i] == suggestions[0]:
+                num_correct_suggestions_r1 += 1
+            if original_targets[i] in suggestions[:5]:
+                num_correct_suggestions_r5 += 1
+            # solely for the purpose of debugging
+            print "%s:%s--%s(%.2f, isUNKNOWN=%s)" % (original_targets[i], suggestions[:5], copy_word, copy_prob, target_is_unk[i])
+            num_suggestion_points += 1
+
+        print "Rank 1 Accuracy: %s" % (float(num_correct_suggestions_r1) / num_suggestion_points)
+        print "Rank 5 Accuracy: %s" % (float(num_correct_suggestions_r5) / num_suggestion_points)
+
+    def get_suggestions_for_next_subtoken(self, current_code, current_code_sentence, current_name_contexts):
+        copy_weights, copy_prob, name_logprobs = self.model.copy_probs(current_name_contexts, current_code_sentence)
+        copy_weights /= np.sum(copy_weights) # convert to probabilities
+        copy_dist = self.get_copy_distribution(copy_weights, current_code)
+
+        if len(copy_dist) > 0:
+            copy_word = copy_dist.keys()[0]
+            top_score = copy_dist[copy_word]
+        else:
+            copy_word = None
+            top_score = None
+        for word, score in copy_dist.iteritems():
+            if score > top_score:
+                top_score = score
+                copy_word = word
+
+        subtoken_target_logprob = defaultdict(lambda: float('-inf')) # log probability of each subtoken
+        for j in xrange(len(self.naming_data.all_tokens_dictionary) - 1):
+            subtoken_target_logprob[self.naming_data.all_tokens_dictionary.token_from_id(j)] = np.log(1. - copy_prob) + name_logprobs[j]
+
+        copy_logprob = np.log(copy_prob)
+        for word, word_copied_log_prob in copy_dist.iteritems():
+            subtoken_target_logprob[word] = np.logaddexp(subtoken_target_logprob[word], copy_logprob + word_copied_log_prob)
+
+        suggestions = sorted(subtoken_target_logprob.keys(), key=lambda x: subtoken_target_logprob[x], reverse=True)
+        return copy_prob, copy_word, suggestions, subtoken_target_logprob
+
+    identifier_matcher = re.compile('[a-zA-Z0-9]+')
+
+    def get_copy_distribution(self, copy_weights, code):
+        """
+        Return a distribution over the copied tokens. Some tokens may be invalid (ie. non alphanumeric), there are
+         excluded, but the distribution is not re-normalized. This is probabilistically weird, but it possibly lets the
+         non-copy mechanism to recover.
+        """
+        token_probs = defaultdict(lambda: float('-inf')) # log prob of each token
+        for code_token, weight in zip(code, copy_weights):
+            if self.identifier_matcher.match(code_token) is not None:
+                token_probs[code_token] = np.logaddexp(token_probs[code_token], np.log(weight))
+        return token_probs
+
+
+    def get_copy_pos(self, copy_weights, code):
+        sorted_idxs = np.argsort(-copy_weights)
+        for i in xrange(len(sorted_idxs)):
+            token = code[sorted_idxs[i]]
+            if self.identifier_matcher.match(token) is None:
+                continue
+            return sorted_idxs[i], i
+        return np.argmax(copy_weights), i # There is not a single identifier, just use something...
+
+    def evaluate_copy_decisions(self, input_file):
+        test_data, original_names = self.naming_data.data_in_copy_conv_format(input_file, self.name_cx_size, self.padding_size)
+        name_targets, orignal_targets, name_contexts, code_sentences, code, copy_vectors, target_is_unk, original_name_ids = test_data
+
+        # Pct of correct copy decisions (assuming a .5 threshold)
+        copy = {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
+
+        # Given that we want to copy, pct of correct positions to copy
+        copy_pos = {"correct": 0, "all": 0}
+
+        for i in xrange(len(name_targets)):
+            copy_weights, copy_prob, name_logprobs = self.model.copy_probs(name_contexts[i], code_sentences[i])
+            should_we_copy = len(copy_vectors[i][copy_vectors[i] > 0]) > 0
+            we_copied = copy_prob > .5
+            if we_copied and should_we_copy:
+                copy["tp"] += 1
+            elif we_copied and not should_we_copy:
+                copy["fp"] += 1
+            elif not we_copied and should_we_copy:
+                copy["fn"] += 1
+            else:
+                copy["tn"] += 1
+
+            if should_we_copy:
+                copied_pos, times_backoff = self.get_copy_pos(copy_weights, code[i])
+                copied_correct_pos = copy_vectors[i][copied_pos] == 1
+                copy_pos["all"] += 1
+                if copied_correct_pos:
+                    copy_pos["correct"] += 1
+
+        print "Statistics"
+        print "Copy Decisions: %s" % copy
+        print "Copy Position Decisions: %s" % copy_pos
+
+    def evaluate_suggestion_decisions(self, input_file):
+        test_data, original_names = self.naming_data.data_in_copy_conv_format(input_file, self.name_cx_size, self.padding_size)
+        name_targets, orignal_targets, name_contexts, code_sentences, code, copy_vectors, target_is_unk, original_name_ids = test_data
+        code = np.array(code, dtype=np.object)
+
+        ids, unique_idx = np.unique(original_name_ids, return_index=True)
+        eval = F1Evaluator(self)
+        point_suggestion_eval = eval.compute_names(code[unique_idx], original_names, self.naming_data.all_tokens_dictionary.get_all_names())
+        print point_suggestion_eval
+        return point_suggestion_eval.get_f1_at_all_ranks()
+
+    """
+    similar logic to the one written for next subtoken suggestion prediction in formatting tokens
+    """
+    def predict_name(self, code, max_predicted_identifier_size=4, max_steps=100):
+        assert self.parameters is not None, "Untrained model"
+        code = code[0]
+        code_features = [self.naming_data.all_tokens_dictionary.is_id_or_is_unknown(tok) for tok in code]
+        padding = [self.naming_data.all_tokens_dictionary.is_id_or_is_unknown(self.naming_data.NONE)]
+        if self.padding_size % 2 == 0:
+            code_sentence = padding * (self.padding_size / 2) + code_features + padding * (self.padding_size / 2)
+        else:
+            code_sentence = padding * (self.padding_size / 2 + 1) + code_features + padding * (self.padding_size / 2)
+
+        code_features = np.array(code_sentence, dtype=np.int32)
+
+        ## Predict all possible names
+        suggestions = defaultdict(lambda: float('-inf'))  # A list of tuple of full suggestions (token, prob)
+        # A stack of partial suggestion in the form ([subword1, subword2, ...], logprob)
+        possible_suggestions_stack = [
+            ([self.naming_data.NONE] * (self.name_cx_size - 1) + [self.naming_data.SUBTOKEN_START], [], 0)]
+        # Keep the max_size_to_keep suggestion scores (sorted in the heap). Prune further exploration if something has already
+        # lower score
+        predictions_probs_heap = [float('-inf')]
+        max_size_to_keep = 20
+        nsteps = 0
+        while True:
+            scored_list = []
+            while len(possible_suggestions_stack) > 0:
+                subword_tokens = possible_suggestions_stack.pop()
+
+                # If we're done, append to full suggestions
+                if subword_tokens[0][-1] == self.naming_data.SUBTOKEN_END:
+                    final_prediction = tuple(subword_tokens[1][:-1])
+                    if len(final_prediction) == 0:
+                        continue
+                    log_prob_of_suggestion = np.logaddexp(suggestions[final_prediction], subword_tokens[2])
+                    if log_prob_of_suggestion > predictions_probs_heap[0] and not log_prob_of_suggestion == float('-inf'):
+                        # Push only if the score is better than the current minimum and > 0 and remove extraneous entries
+                        suggestions[final_prediction] = log_prob_of_suggestion
+                        heapq.heappush(predictions_probs_heap, log_prob_of_suggestion)
+                        if len(predictions_probs_heap) > max_size_to_keep:
+                            heapq.heappop(predictions_probs_heap)
+                    continue
+                elif len(subword_tokens[1]) > max_predicted_identifier_size:  # Stop recursion here
+                    continue
+
+                # Convert subword context
+                context = [self.naming_data.name_dictionary.is_id_or_is_unknown(k) for k in subword_tokens[0][-self.name_cx_size:]]
+                assert len(context) == self.name_cx_size
+                context = np.array(context, dtype=np.int32)
+
+                # Predict next subwords
+                copy_prob, copy_word, next_subtoken_suggestions, subtoken_target_logprob \
+                    = self.get_suggestions_for_next_subtoken(code, code_features, context)
+
+                subtoken_target_logprob["***"] = subtoken_target_logprob[self.naming_data.all_tokens_dictionary.get_unknown()]
+
+                def get_possible_options(subword_name):
+                    if subword_name == self.naming_data.all_tokens_dictionary.get_unknown():
+                        subword_name = "***"
+                    name = subword_tokens[1] + [subword_name]
+                    return subword_tokens[0][1:] + [subword_name], name, subtoken_target_logprob[subword_name] + \
+                           subword_tokens[2]
+
+                possible_options = [get_possible_options(next_subtoken_suggestions[i]) for i in xrange(max_size_to_keep)]
+                # Disallow suggestions that contain duplicated subtokens.
+                scored_list.extend(filter(lambda x: len(x[1]) == 1 or x[1][-1] != x[1][-2], possible_options))
+
+            # Prune
+            scored_list = filter(lambda suggestion: suggestion[2] >= predictions_probs_heap[0] and suggestion[2] >= float('-inf'), scored_list)
+            scored_list.sort(key=lambda entry: entry[2], reverse=True)
+
+            # Update
+            possible_suggestions_stack = scored_list[:max_size_to_keep]
+            nsteps += 1
+            if nsteps >= max_steps:
+                break
+
+        # Sort and append to predictions
+        suggestions = [(identifier, np.exp(logprob)) for identifier, logprob in suggestions.items()]
+        suggestions.sort(key=lambda entry: entry[1], reverse=True)
+        return suggestions
+
