@@ -307,3 +307,67 @@ class CopyAttentionalLearner:
         suggestions.sort(key=lambda entry: entry[1], reverse=True)
         return suggestions
 
+def run_from_config(params, *args):
+    if len(args) < 2:
+        print "No input file or test file given: %s:%s" % (args, len(args))
+        sys.exit(-1)
+    input_file = args[0]
+    test_file = args[1]
+    if len(args) > 2:
+        num_epochs = int(args[2])
+    else:
+        num_epochs = 80
+
+    # Transform params
+    params["D"] = 2 ** params["logD"]
+    params["conv_layer1_nfilters"] = 2 ** params["log_conv_layer1_nfilters"]
+    params["conv_layer2_nfilters"] = 2 ** params["log_conv_layer2_nfilters"]
+
+    model = CopyAttentionalLearner(params)
+    model.train(input_file, max_epochs=num_epochs)
+    f1_values = model.evaluate_suggestion_decisions(test_file)
+    return -f1_values[1]
+
+if __name__ == "__main__":
+    if len(sys.argv) < 5:
+        print 'Usage <input_file> <max_num_epochs> d <test_file>'
+        sys.exit(-1)
+    logging.basicConfig(level=logging.INFO)
+    input_file = sys.argv[1]
+    max_num_epochs = int(sys.argv[2])
+    params = {
+        "D": int(sys.argv[3]),
+        "name_cx_size": 1,
+        "conv_layer1_nfilters": 32,
+        "conv_layer2_nfilters": 16,
+        "layer1_window_size": 18,
+        "layer2_window_size": 19,
+        "layer3_window_size": 2,
+        "log_code_rep_init_scale": -3.1,
+        "log_name_rep_init_scale": -1,
+        "log_layer1_init_scale": -3.68,
+        "log_layer2_init_scale": -4,
+        "log_layer3_init_scale": -4,
+        "log_name_cx_init_scale": -1.06,
+        "log_copy_init_scale":-0.5,
+        "log_learning_rate": -3.05,
+        "rmsprop_rho": .99,
+        "momentum": 0.87,
+        "dropout_rate": 0.4,
+        "grad_clip":.75
+    }
+
+    params["train_file"] = input_file
+    params["test_file"] = sys.argv[4]
+    with ExperimentLogger("CopyAttentionalLearner", params) as experiment_log:
+        model = CopyAttentionalLearner(params)
+        model.train(input_file, max_epochs=max_num_epochs)
+        model.save("copy_convolutional_att_model" + os.path.basename(params["train_file"]) + ".pkl")
+
+        model2 = CopyAttentionalLearner.load("copy_convolutional_att_model" + os.path.basename(params["train_file"]) + ".pkl")
+        model2.evaluate_copy_decisions(sys.argv[4])
+        model2.evaluate_decision_accuracy(sys.argv[4])
+        f1_values = model2.evaluate_suggestion_decisions(sys.argv[4])
+        print f1_values
+        experiment_log.record_results({"f1_at_rank1":f1_values[0], "f1_at_rank5":f1_values[1]})
+        return learner
