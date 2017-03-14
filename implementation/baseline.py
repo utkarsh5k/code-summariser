@@ -1,4 +1,5 @@
 import math
+import numpy as np
 
 from collections import defaultdict, Counter
 
@@ -28,3 +29,15 @@ def compute_idfs(tokens_per_document):
         return idf
 
     return {token: idf(t) for token in token_counts}
+
+def compute_names_vector(data, vsm_idfs):
+    names = []
+    vsm = np.zeros((len(data), len(vsm_idfs)))
+    for i, document in enumerate(data):
+        document_terms = Counter(document["tokens"])
+        total_terms = len(document["tokens"])
+        name = document["name"]
+        names.append(name)
+        for j, term in enumerate(vsm_idfs.keys()):
+            vsm[i, j] = float(document_terms[term]) / total_terms * vsm_idfs[term]
+    return names, vsm
