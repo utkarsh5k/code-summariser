@@ -1,7 +1,14 @@
+# Usage: python baseline.py train test
+
 import math
 import numpy as np
+import sys
+import json
 
+from scipy.spatial.distance import cdist
 from collections import defaultdict, Counter
+
+from f1_score import PointSuggestionEvaluator, token_precision_recall
 
 def compute_idfs(tokens_per_document):
     token_counts = defaultdict(int)
@@ -41,3 +48,40 @@ def compute_names_vector(data, vsm_idfs):
         for j, term in enumerate(vsm_idfs.keys()):
             vsm[i, j] = float(document_terms[term]) / total_terms * vsm_idfs[term]
     return names, vsm
+
+if __name__ == "__main__":
+    # Usage: python baseline.py train test
+    train_file = sys.argv[1]
+    test_file = sys.argv[2]
+    print 'IDF training'
+    with open(train_file) as f:
+        train_data = json.load(f)
+
+    tokens = [document["tokens"] for document in train_data]
+    vsm_idfs = compute_idfs(tokens)
+    names, train_vectors = compute_names_vector(train_data, vsm_idfs)
+
+    print "Getting test vectors"
+    with open(test_file) as f:
+        test_data = json.load(f)
+    test_names, test_vectors = compute_names_vector(test_data, vsm_idfs)
+
+    print "Suggestion computation"
+    # Suggest the nearest neighbor name for the test vector in minibatches
+    eval = PointSuggestionEvaluator()
+    num_ranks = 5
+    minibatch_size = 100
+    for batch_id in xrange(int(math.ceil(float(len(test_names)) / minibatch_size))):
+        from_id = minibatch_size * batch_id
+        to_id = from_id + minibatch_size
+        distances = cdist(test_vectors[from_id:to_id], train_vectors, 'cosine')
+        suggestions = np.argsort(distances, axis=1)
+        sys.stdout.write(".")
+        for i in xrange(suggestions.shape[0]):
+            suggested_names = [names[suggestions[i][j]] for j in xrange(num_ranks)]
+            real_name = test_names[from_id + i]
+            res = [token_precision_recall(name, real_name) for name in suggested_names]
+            is_correct = [len(real_name) == len(name) and all(k == l for k, l in zip(name, real_name)) for name in suggested_names]
+            eval.add_result([1.] * num_ranks , is_correct, [False] * num_ranks, res)
+    print ''
+    print eval
