@@ -135,55 +135,57 @@ class CopyConvolutionalRecurrentAttentionalModel(object):
         self.__compile_model_functions()
 
     def __compile_model_functions(self):
-            grad_acc = [theano.shared(np.zeros(param.get_value().shape).astype(floatX)) for param in self.train_parameters] \
-                        + [theano.shared(np.zeros(1,dtype=floatX)[0], name="sentence_count")]
+        grad_acc = [theano.shared(np.zeros(param.get_value().shape).astype(floatX)) for param in self.train_parameters] \
+                    + [theano.shared(np.zeros(1,dtype=floatX)[0], name="sentence_count")]
 
-            sentence = T.ivector("sentence")
-            is_copy_matrix = T.imatrix("is_copy_matrix")
-            name_targets = T.ivector("name_targets")
-            targets_is_unk = T.ivector("targets_is_unk")
+        sentence = T.ivector("sentence")
+        is_copy_matrix = T.imatrix("is_copy_matrix")
+        name_targets = T.ivector("name_targets")
+        targets_is_unk = T.ivector("targets_is_unk")
 
-            #theano.config.compute_test_value = 'warn'
-            sentence.tag.test_value = np.arange(105).astype(np.int32)
-            name_targets.tag.test_value = np.arange(5).astype(np.int32)
-            targets_is_unk.tag.test_value = np.array([0, 0, 1, 0, 0], dtype=np.int32)
-            is_copy_test_value = [[i % k == k-2 for i in xrange(105 - self.padding_size)] for k in [1, 7, 10, 25, 1]]
-            is_copy_matrix.tag.test_value = np.array(is_copy_test_value, dtype=np.int32)
+        #theano.config.compute_test_value = 'warn'
+        sentence.tag.test_value = np.arange(105).astype(np.int32)
+        name_targets.tag.test_value = np.arange(5).astype(np.int32)
+        targets_is_unk.tag.test_value = np.array([0, 0, 1, 0, 0], dtype=np.int32)
+        is_copy_test_value = [[i % k == k-2 for i in xrange(105 - self.padding_size)] for k in [1, 7, 10, 25, 1]]
+        is_copy_matrix.tag.test_value = np.array(is_copy_test_value, dtype=np.int32)
 
-            _, _, copy_weights, _, copy_probs, name_log_probs, _\
-                    = self.__get_model_likelihood_for_sentence(sentence, name_targets, do_dropout=True, dropout_rate=self.hyperparameters["dropout_rate"])
+        _, _, copy_weights, _, copy_probs, name_log_probs, _\
+                = self.__get_model_likelihood_for_sentence(sentence, name_targets, do_dropout=True, dropout_rate=self.hyperparameters["dropout_rate"])
 
-            correct_answer_log_prob = self.model_objective(copy_probs[:-1], copy_weights[:-1], is_copy_matrix[1:], name_log_probs[:-1], name_targets[1:], targets_is_unk[1:])
+        correct_answer_log_prob = self.model_objective(copy_probs[:-1], copy_weights[:-1], is_copy_matrix[1:], name_log_probs[:-1], name_targets[1:], targets_is_unk[1:])
 
-            grad = T.grad(correct_answer_log_prob, self.train_parameters)
-            self.grad_accumulate = theano.function(inputs=[sentence, is_copy_matrix, targets_is_unk, name_targets], updates=[(v, v+g) for v, g in zip(grad_acc, grad)] + [(grad_acc[-1], grad_acc[-1]+1)], #mode='NanGuardMode')
+        grad = T.grad(correct_answer_log_prob, self.train_parameters)
+        self.grad_accumulate = theano.function(inputs=[sentence, is_copy_matrix, targets_is_unk, name_targets], updates=[(v, v+g) for v, g in zip(grad_acc, grad)] + [(grad_acc[-1], grad_acc[-1]+1)], #mode='NanGuardMode')
 
-            normalized_grads = [T.switch(grad_acc[-1] >0, g / grad_acc[-1], g) for g in grad_acc[:-1]]
-            step_updates, ratios = nesterov_rmsprop_multiple(self.train_parameters, normalized_grads,
-                                                    learning_rate=10 ** self.hyperparameters["log_learning_rate"],
-                                                    rho=self.hyperparameters["rmsprop_rho"],
-                                                    momentum=self.hyperparameters["momentum"],
-                                                    grad_clip=self.hyperparameters["grad_clip"],
-                                                    output_ratios=True)
-            step_updates.extend([(v, T.zeros(v.shape)) for v in grad_acc[:-1]])  # Set accumulators to 0
-            step_updates.append((grad_acc[-1], 0))
+        normalized_grads = [T.switch(grad_acc[-1] >0, g / grad_acc[-1], g) for g in grad_acc[:-1]]
+        step_updates, ratios = nesterov_rmsprop_multiple(self.train_parameters, normalized_grads,
+                                                learning_rate=10 ** self.hyperparameters["log_learning_rate"],
+                                                rho=self.hyperparameters["rmsprop_rho"],
+                                                momentum=self.hyperparameters["momentum"],
+                                                grad_clip=self.hyperparameters["grad_clip"],
+                                                output_ratios=True)
+        step_updates.extend([(v, T.zeros(v.shape)) for v in grad_acc[:-1]])  # Set accumulators to 0
+        step_updates.append((grad_acc[-1], 0))
 
-            self.grad_step = theano.function(inputs=[], updates=step_updates, outputs=ratios)
+        self.grad_step = theano.function(inputs=[], updates=step_updates, outputs=ratios)
 
 
-            test_sentence, test_name_targets, test_copy_weights, test_attention_weights, test_copy_probs, test_name_log_probs,\
-                             test_attention_features \
-                = self.__get_model_likelihood_for_sentence(T.ivector("test_sentence"),  T.ivector("test_name_targets"), do_dropout=False)
+        test_sentence, test_name_targets, test_copy_weights, test_attention_weights, test_copy_probs, test_name_log_probs,\
+                         test_attention_features \
+            = self.__get_model_likelihood_for_sentence(T.ivector("test_sentence"),  T.ivector("test_name_targets"), do_dropout=False)
 
-            self.copy_probs = theano.function(inputs=[test_name_targets, test_sentence], outputs=[test_copy_weights, test_copy_probs, test_name_log_probs])
+        self.copy_probs = theano.function(inputs=[test_name_targets, test_sentence], outputs=[test_copy_weights, test_copy_probs, test_name_log_probs])
 
-            test_copy_matrix = T.imatrix("test_copy_matrix")
-            test_target_is_unk = T.ivector("test_target_is_unk")
-            ll = self.model_objective(test_copy_probs[:-1], test_copy_weights[:-1], test_copy_matrix[1:], test_name_log_probs[:-1], test_name_targets[1:], test_target_is_unk[1:])
-            self.copy_logprob = theano.function(inputs=[test_sentence, test_copy_matrix, test_target_is_unk, test_name_targets], outputs=ll)
-            self.attention_weights = theano.function(inputs=[test_name_targets, test_sentence], outputs=test_attention_weights)
-            layer3_padding = self.hyperparameters["layer3_window_size"] - 1
-            upper_pos = -layer3_padding/2+1 if -layer3_padding/2+1 < 0 else None
-            self.attention_features = theano.function(inputs=[test_sentence, test_name_targets], outputs=test_attention_features[-1, 0, :, layer3_padding/2+1:upper_pos, 0])
+        test_copy_matrix = T.imatrix("test_copy_matrix")
+        test_target_is_unk = T.ivector("test_target_is_unk")
+        ll = self.model_objective(test_copy_probs[:-1], test_copy_weights[:-1], test_copy_matrix[1:], test_name_log_probs[:-1], test_name_targets[1:], test_target_is_unk[1:])
+        self.copy_logprob = theano.function(inputs=[test_sentence, test_copy_matrix, test_target_is_unk, test_name_targets], outputs=ll)
+        self.attention_weights = theano.function(inputs=[test_name_targets, test_sentence], outputs=test_attention_weights)
+        layer3_padding = self.hyperparameters["layer3_window_size"] - 1
+        upper_pos = -layer3_padding/2+1 if -layer3_padding/2+1 < 0 else None
+        self.attention_features = theano.function(inputs=[test_sentence, test_name_targets], outputs=test_attention_features[-1, 0, :, layer3_padding/2+1:upper_pos, 0])
+
+    
 
 
