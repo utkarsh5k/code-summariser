@@ -3,7 +3,7 @@ from theano import tensor as T
 import numpy as np
 from theano.tensor.shared_randomstreams import RandomStreams
 
-from optimization import nesterov_rmsprop_multiple
+from optimization import nesterov_rmsprop_multiple, log_softmax, dropout_multiple, logsumexp
 
 floatX = theano.config.floatX
 
@@ -186,6 +186,106 @@ class CopyConvolutionalRecurrentAttentionalModel(object):
         upper_pos = -layer3_padding/2+1 if -layer3_padding/2+1 < 0 else None
         self.attention_features = theano.function(inputs=[test_sentence, test_name_targets], outputs=test_attention_features[-1, 0, :, layer3_padding/2+1:upper_pos, 0])
 
-    
+    def __get_model_likelihood_for_sentence(self, sentence, name_targets, do_dropout=False, dropout_rate=0.5):
+        code_embeddings = self.all_name_reps[sentence] # SentSize x D
+
+        if do_dropout:
+            code_embeddings,  conv_weights_code_l1, conv_weights_code_l2, conv_weights_code_copy_l3,\
+                conv_weights_code_do_copy, conv_weights_code_att_l3, \
+                 = dropout_multiple(dropout_rate, self.rng, code_embeddings, self.conv_layer1_code,
+                                    self.conv_layer2_code, self.conv_layer3_copy_code, self.conv_copy_code,
+                                    self.conv_layer3_att_code)
+
+            # GRU
+            gru_prediction_to_reset, gru_prediction_to_hidden, gru_prediction_to_update, \
+                gru_prev_hidden_to_reset, gru_prev_hidden_to_next, gru_prev_hidden_to_update = \
+                dropout_multiple(dropout_rate, self.rng,
+                             self.gru_prediction_to_reset, self.gru_prediction_to_hidden, self.gru_prediction_to_update,
+                             self.gru_prev_hidden_to_reset, self.gru_prev_hidden_to_next, self.gru_prev_hidden_to_update)
+        else:
+            conv_weights_code_l1 = self.conv_layer1_code
+            conv_weights_code_l2 = self.conv_layer2_code
+            conv_weights_code_copy_l3 = self.conv_layer3_copy_code
+            conv_weights_code_do_copy = self.conv_copy_code
+            conv_weights_code_att_l3 = self.conv_layer3_att_code
+
+            gru_prediction_to_reset, gru_prediction_to_hidden, gru_prediction_to_update,\
+                gru_prev_hidden_to_reset, gru_prev_hidden_to_next, gru_prev_hidden_to_update = \
+                    self.gru_prediction_to_reset, self.gru_prediction_to_hidden, self.gru_prediction_to_update, \
+                             self.gru_prev_hidden_to_reset, self.gru_prev_hidden_to_next, self.gru_prev_hidden_to_update
+
+
+        code_convolved_l1 = T.nnet.conv2d(code_embeddings.dimshuffle('x', 'x', 0, 1), conv_weights_code_l1, input_shape=(1, 1, None, self.D), filter_shape=self.conv_layer1_code.get_value().shape)
+        l1_out = code_convolved_l1 + self.conv_layer1_bias.dimshuffle('x', 0, 'x', 'x')
+        l1_out = T.switch(l1_out>0, l1_out, 0.1 * l1_out)
+
+        code_convolved_l2 = T.nnet.conv2d(l1_out, conv_weights_code_l2, input_shape=(1, self.hyperparameters["conv_layer1_nfilters"], None, 1), filter_shape=self.conv_layer2_code.get_value().shape)
+        l2_out = code_convolved_l2 + self.conv_layer2_bias.dimshuffle('x', 0, 'x', 'x')
+
+        def step(target_token_id, hidden_state, attention_features,
+                 gru_prediction_to_reset, gru_prediction_to_hidden, gru_prediction_to_update,
+                 gru_prev_hidden_to_reset, gru_prev_hidden_to_next, gru_prev_hidden_to_update,
+                 gru_hidden_update_bias, gru_update_bias, gru_reset_bias,
+                 conv_att_weights_code_l3, conv_att_layer3_bias,
+                 conv_weights_code_copy_l3, conv_layer3_copy_bias,
+                 conv_weights_code_do_copy, conv_copy_bias,
+                 code_embeddings, all_name_reps, use_prev_stat):
+            gated_l2 = attention_features * T.switch(hidden_state>0, hidden_state, 0.01 * hidden_state).dimshuffle(0, 1, 'x', 'x')
+            gated_l2 = gated_l2 / gated_l2.norm(2)
+            # Normal Attention
+            code_convolved_l3 = T.nnet.conv2d(gated_l2, conv_att_weights_code_l3, input_shape=(1, self.hyperparameters["conv_layer2_nfilters"], None, 1), filter_shape=self.conv_layer3_att_code.get_value().shape)[:, 0, :, 0]
+
+            l3_out = code_convolved_l3 + conv_att_layer3_bias
+            code_toks_weights = T.nnet.softmax(l3_out)  # This should be one dimension (the size of the sentence)
+            predicted_embedding = T.tensordot(code_toks_weights, code_embeddings[self.padding_size/2 + 1:-self.padding_size/2 + 1], [[1], [0]])[0]
+
+            # Copy Attention
+            code_copy_convolved_l3 = T.nnet.conv2d(gated_l2, conv_weights_code_copy_l3, sinput_shape=(1, self.hyperparameters["conv_layer2_nfilters"], None, 1), filter_shape=self.conv_layer3_copy_code.get_value().shape)[:, 0, :, 0]
+
+            copy_l3_out = code_copy_convolved_l3 + conv_layer3_copy_bias
+            copy_pos_probs = T.nnet.softmax(copy_l3_out)[0]  # This should be one dimension (the size of the sentence)
+
+            # Do we copy?
+            do_copy_code = T.max(T.nnet.conv2d(gated_l2, conv_weights_code_do_copy, input_shape=(1, self.hyperparameters["conv_layer2_nfilters"], None, 1), filter_shape=self.conv_copy_code.get_value().shape)[:, 0, :, 0])
+            copy_prob = T.nnet.sigmoid(do_copy_code + conv_copy_bias)
+
+            # Get the next hidden!
+            if do_dropout:
+                # For regularization, we can use the context embeddings *some* of the time
+                embedding_used = T.switch(use_prev_stat, all_name_reps[target_token_id], predicted_embedding)
+            else:
+                embedding_used = all_name_reps[target_token_id]
+
+            reset_gate = T.nnet.sigmoid(T.dot(embedding_used, gru_prediction_to_reset) + T.dot(hidden_state, gru_prev_hidden_to_reset) + gru_reset_bias)
+            update_gate = T.nnet.sigmoid(T.dot(embedding_used, gru_prediction_to_update) + T.dot(hidden_state, gru_prev_hidden_to_update) + gru_update_bias)
+            hidden_update = T.tanh(T.dot(embedding_used, gru_prediction_to_hidden) + reset_gate * T.dot(hidden_state, gru_prev_hidden_to_next) + gru_hidden_update_bias)
+
+            next_hidden = (1. - update_gate) * hidden_state + update_gate * hidden_update
+
+            return next_hidden, predicted_embedding, copy_pos_probs, copy_prob, code_toks_weights, gated_l2
+
+        use_prev_stat = self.rng.binomial(n=1, p=1.-dropout_rate)
+        non_sequences = [l2_out,
+                         gru_prediction_to_reset, gru_prediction_to_hidden, gru_prediction_to_update, # GRU
+                         gru_prev_hidden_to_reset, gru_prev_hidden_to_next, gru_prev_hidden_to_update,
+                         self.gru_hidden_update_bias, self.gru_update_bias, self.gru_reset_bias,
+                         conv_weights_code_att_l3, self.conv_layer3_att_bias,  # Normal Attention
+                         conv_weights_code_copy_l3, self.conv_layer3_copy_bias, # Copy Attention
+                         conv_weights_code_do_copy, self.conv_copy_bias, # Do we copy?
+                         code_embeddings, self.all_name_reps, use_prev_stat]
+
+        [h, predictions, copy_weights, copy_probs, attention_weights, filtered_features], _ = \
+                                                                           theano.scan(step, sequences=name_targets, outputs_info=[self.h0, None, None, None, None, None], name="target_name_scan", non_sequences=non_sequences, strict=True)
+
+        name_log_probs = log_softmax(T.dot(predictions, T.transpose(self.all_name_reps[:-1])) + self.name_bias) # SxD, DxK -> SxK
+
+        return sentence, name_targets, copy_weights, attention_weights, copy_probs, name_log_probs, filtered_features
+
+    def model_objective(self, copy_probs, copy_weights, is_copy_matrix, name_log_probs, name_targets, targets_is_unk):
+        # if there is at least one position to copy from, then we should #TODO: Fix
+        use_copy_prob = T.switch(T.sum(is_copy_matrix, axis=1) > 0, T.log(copy_probs) + T.log(T.sum(is_copy_matrix * copy_weights, axis=1)+10e-8), -1000)
+        use_model_prob = T.switch(targets_is_unk, -10, 0) + T.log(1. - copy_probs) + name_log_probs[T.arange(name_targets.shape[0]), name_targets]
+        correct_answer_log_prob = logsumexp(use_copy_prob, use_model_prob)
+        return T.mean(correct_answer_log_prob)
 
 
