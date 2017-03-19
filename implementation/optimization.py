@@ -11,6 +11,10 @@ def logsumexp(x, y):
     min = T.switch(x > y, y, x)
     return T.log1p(T.exp(min - max)) + max
 
+def log_softmax(x):
+    xdev = x - x.max(1, keepdims=True)
+    return xdev - T.log(T.sum(T.exp(xdev), axis=1, keepdims=True))
+
 def dropout(dropout_rate, rng, parameter):
     mask = rng.binomial(parameter.shape, p=1.-dropout_rate, dtype=parameter.dtype)
     return parameter * mask / (1. - dropout_rate)
