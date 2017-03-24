@@ -8,9 +8,11 @@ import numpy as np
 
 from collections import defaultdict
 from math import ceil
+from experimenter import ExperimentLogger
 
 from copy_conv_rec_model import CopyConvolutionalRecurrentAttentionalModel
 from formatting_tokens import FormatTokens
+from f1_score import F1Evaluator
 
 class ConvolutionalCopyAttentionalRecurrentLearner:
     def __init__(self, hyperparameters):
@@ -102,5 +104,81 @@ class ConvolutionalCopyAttentionalRecurrentLearner:
         model.restore_parameters(best_params)
 
     identifier_matcher = re.compile('[a-zA-Z0-9]+')
+
+def run_from_config(params, *args):
+    if len(args) < 2:
+        print "No input file or test file given: %s:%s" % (args, len(args))
+        sys.exit(-1)
+    input_file = args[0]
+    test_file = args[1]
+    if len(args) > 2:
+        num_epochs = int(args[2])
+    else:
+        num_epochs = 1000
+
+    params["D"] = 2 ** params["logD"]
+    params["conv_layer1_nfilters"] = 2 ** params["log_conv_layer1_nfilters"]
+    params["conv_layer2_nfilters"] = 2 ** params["log_conv_layer2_nfilters"]
+
+    model = ConvolutionalCopyAttentionalRecurrentLearner(params)
+    model.train(input_file, max_epochs=num_epochs)
+
+    test_data, original_names = model.naming_data.data_in_rec_copy_conv_format(test_file, model.padding_size)
+    test_name_targets, test_code_sentences, test_code, test_target_is_unk, test_copy_vectors = test_data
+    eval = F1Evaluator(model)
+    point_suggestion_eval = eval.compute_names_f1(test_code, original_names, model.naming_data.all_tokens_dictionary.get_all_names())
+    return -point_suggestion_eval.get_f1_at_all_ranks()[1]
+
+if __name__ == "__main__":
+    if len(sys.argv) < 5:
+        print 'Usage <input_file> <max_num_epochs> d <test_file>'
+        sys.exit(-1)
+
+    input_file = sys.argv[1]
+    max_num_epochs = int(sys.argv[2])
+    params = {
+        "D": int(sys.argv[3]),
+        "conv_layer1_nfilters": 32,
+        "conv_layer2_nfilters": 16,
+        "layer1_window_size": 18,
+        "layer2_window_size": 19,
+        "layer3_window_size": 2,
+        "log_name_rep_init_scale": -1,
+        "log_layer1_init_scale": -3.68,
+        "log_layer2_init_scale": -4,
+        "log_layer3_init_scale": -4,
+        "log_hidden_init_scale": -1,
+        "log_copy_init_scale":-0.5,
+        "log_learning_rate": -3.05,
+        "rmsprop_rho": .99,
+        "momentum": 0.87,
+        "dropout_rate": 0.4,
+        "grad_clip":.75
+    }
+
+    params["train_file"] = input_file
+    if len(sys.argv) > 4:
+        params["test_file"] = sys.argv[4]
+    with ExperimentLogger("ConvolutionalCopyAttentionalRecurrentLearner", params) as experiment_log:
+        if max_num_epochs:
+            model = ConvolutionalCopyAttentionalRecurrentLearner(params)
+            model.train(input_file, max_epochs=max_num_epochs)
+            model.save("copy_convolutional_att_rec_model" + os.path.basename(params["train_file"]) + ".pkl")
+
+        if params.get("test_file") is None:
+            exit()
+
+        model2 = ConvolutionalCopyAttentionalRecurrentLearner.load("copy_convolutional_att_rec_model" + os.path.basename(params["train_file"]) + ".pkl")
+
+        test_data, original_names = model2.naming_data.data_in_rec_copy_conv_format(sys.argv[4], model2.padding_size)
+        test_name_targets, test_code_sentences, test_code, test_target_is_unk, test_copy_vectors = test_data
+
+        eval = F1Evaluator(model2)
+        point_suggestion_eval = eval.compute_names(test_code, original_names, model2.naming_data.all_tokens_dictionary.get_all_names())
+        print point_suggestion_eval
+        results = point_suggestion_eval.get_f1_at_all_ranks()
+        print results
+        experiment_log.record_results({"f1_at_rank1": results[0], "f1_at_rank5":results[1]})
+
 
     
