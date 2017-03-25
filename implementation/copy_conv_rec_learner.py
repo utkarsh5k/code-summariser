@@ -105,6 +105,33 @@ class ConvolutionalCopyAttentionalRecurrentLearner:
 
     identifier_matcher = re.compile('[a-zA-Z0-9]+')
 
+    def get_copy_distribution(self, copy_weights, code):
+        """
+        Some tokens may be invalid and are excluded. However, distribution is not re-normalized.
+        """
+        token_probs = defaultdict(lambda: float('-inf'))    # using log probabilities
+        for code_token, weight in zip(code, copy_weights):
+            if self.identifier_matcher.match(code_token) is not None:
+                token_probs[code_token] = np.logaddexp(token_probs[code_token], np.log(weight))
+        return token_probs
+
+    def get_suggestions_for_next_subtoken(self, current_code, current_code_sentence, predicted_target_tokens_so_far):
+        copy_weights, copy_prob, name_logprobs = self.model.copy_probs(predicted_target_tokens_so_far, current_code_sentence)
+        copy_weights, copy_prob, name_logprobs = copy_weights[-1], copy_prob[-1], name_logprobs[-1]
+        copy_weights /= np.sum(copy_weights)
+        copy_dist = self.get_copy_distribution(copy_weights, current_code)
+
+        subtoken_target_logprob = defaultdict(lambda: float('-inf'))
+        for j in xrange(len(self.naming_data.all_tokens_dictionary) - 1):
+            subtoken_target_logprob[self.naming_data.all_tokens_dictionary.token_from_id(j)] = np.log(1. - copy_prob) + name_logprobs[j]
+
+        copy_logprob = np.log(copy_prob)
+        for word, word_copied_log_prob in copy_dist.iteritems():
+            subtoken_target_logprob[word] = np.logaddexp(subtoken_target_logprob[word], copy_logprob + word_copied_log_prob)
+
+        suggestions = sorted(subtoken_target_logprob.keys(), key=lambda x: subtoken_target_logprob[x], reverse=True)
+        return copy_prob, suggestions, subtoken_target_logprob
+
 def run_from_config(params, *args):
     if len(args) < 2:
         print "No input file or test file given: %s:%s" % (args, len(args))
