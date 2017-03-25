@@ -384,7 +384,7 @@ class FormatTokens:
         return naming.rec_copy_conv_data(names[idxs[:lim]], code[idxs[:lim]], min_code_size),\
                 naming.rec_copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], min_code_size), naming
 
-    def possible_suggestions_from_name_prefix(self, next_name_log_probability, name_cx_size, max_predicted_id_size=5, max_steps=100):
+    def possible_suggestions_from_name_prefix(self, next_name_log_probability, name_cx_size, max_predicted_id_size=7, max_steps=100):
         """
         A list of tuple of full suggestions (token, prob)
         """

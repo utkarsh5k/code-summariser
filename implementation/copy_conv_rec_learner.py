@@ -3,6 +3,7 @@ import sys
 import os
 import time
 import re
+import heapq
 
 import numpy as np
 
@@ -131,6 +132,104 @@ class ConvolutionalCopyAttentionalRecurrentLearner:
 
         suggestions = sorted(subtoken_target_logprob.keys(), key=lambda x: subtoken_target_logprob[x], reverse=True)
         return copy_prob, suggestions, subtoken_target_logprob
+
+    def predict_name(self, code, max_predicted_identifier_size=7, max_steps=100):
+        assert self.parameters is not None, "Untrained model"
+        code = code[0]
+
+        code_sentence = [self.naming_data.all_tokens_dictionary.is_id_or_is_unknown(token) for token in code]
+        padding = [self.naming_data.all_tokens_dictionary.is_id_or_is_unknown(self.naming_data.NONE)]
+        if self.padding_size % 2 == 0:
+            code_sentence = padding * (self.padding_size / 2) + code_sentence + padding * (self.padding_size / 2)
+        else:
+            code_sentence = padding * (self.padding_size / 2 + 1) + code_sentence + padding * (self.padding_size / 2)
+
+        code_sentence = np.array(code_sentence, dtype=np.int32)
+        """
+        A list of tuple of full suggestions (token, prob)
+        """
+        suggestions = defaultdict(lambda: float('-inf'))
+        """
+        A stack of partial suggestion in the form ([subword1, subword2, ...], logprob)
+        - list of subwords and their individual probabilities
+        """
+        possible_suggestions_stack = [([self.naming_data.SUBTOKEN_START], [], 0)]
+        """
+        Keep the max_no_of_suggestions suggestion scores (sorted in the heap). 
+        Prune further exploration if something has already lower score
+        """
+        predictions_probs_heap = [float('-inf')]
+        max_size_to_keep = 20
+        nsteps = 0
+        while True:
+            scored_list = []
+            while len(possible_suggestions_stack) > 0:
+                subword_tokens = possible_suggestions_stack.pop()
+                """
+                If we're done, append to full suggestions
+                """
+                if subword_tokens[0][-1] == self.naming_data.SUBTOKEN_END:
+                    final_prediction = tuple(subword_tokens[1][:-1])
+                    if len(final_prediction) == 0:
+                        continue
+                    log_prob_of_suggestion = np.logaddexp(suggestions[final_prediction], subword_tokens[2])
+                    if log_prob_of_suggestion > predictions_probs_heap[0] and not log_prob_of_suggestion == float('-inf'):
+                        """
+                        Push only if the score is better than the current minimum and > 0
+                        Remove extraneous entries
+                        """
+                        suggestions[final_prediction] = log_prob_of_suggestion
+                        heapq.heappush(predictions_probs_heap, log_prob_of_suggestion)
+                        if len(predictions_probs_heap) > max_size_to_keep:
+                            heapq.heappop(predictions_probs_heap)
+                    continue
+                elif len(subword_tokens[1]) > max_predicted_identifier_size:
+                    continue
+
+                """
+                Convert subword context
+                """
+                previous_subtokens = [self.naming_data.all_tokens_dictionary.is_id_or_is_unknown(token) for token in subword_tokens[0]]
+                previous_subtokens = np.array(previous_subtokens, dtype=np.int32)
+
+                """
+                Predict next subwords
+                """
+                copy_prob, next_subtoken_suggestions, subtoken_target_logprob \
+                    = self.get_suggestions_for_next_subtoken(code, code_sentence, previous_subtokens)
+
+                subtoken_target_logprob["***"] = subtoken_target_logprob[self.naming_data.all_tokens_dictionary.get_unknown()]
+
+                def get_possible_options(subword_name):
+                    if subword_name == self.naming_data.all_tokens_dictionary.get_unknown():
+                        subword_name = "***"
+                    name = subword_tokens[1] + [subword_name]
+                    return subword_tokens[0] + [subword_name], name, subtoken_target_logprob[subword_name] + \
+                           subword_tokens[2]
+
+                possible_options = [get_possible_options(next_subtoken_suggestions[i]) for i in xrange(max_size_to_keep)]
+                """
+                Remove suggestions that contain duplicate subtokens
+                """
+                scored_list.extend(filter(lambda x: len(x[1])==1 or x[1][-1] != x[1][-2], possible_options))
+            """
+            Prune
+            """
+            scored_list = filter(lambda suggestion: suggestion[2] >= predictions_probs_heap[0] and suggestion[2] >= float('-inf'), scored_list)
+            scored_list.sort(key=lambda entry: entry[2], reverse=True)
+            """
+            Update
+            """
+            possible_suggestions_stack = scored_list[:max_size_to_keep]
+            nsteps += 1
+            if nsteps >= max_steps:
+                break
+        """
+        Sort and append to final predictions
+        """
+        suggestions = [(identifier, np.exp(logprob)) for identifier, logprob in suggestions.items()]
+        suggestions.sort(key=lambda entry: entry[1], reverse=True)
+        return suggestions
 
 def run_from_config(params, *args):
     if len(args) < 2:
