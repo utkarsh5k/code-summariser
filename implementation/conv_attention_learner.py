@@ -114,31 +114,31 @@ class ConvolutionalAttentionalLearner:
             return attention_vector
 
     # To implement: run_from_config, main
-    def run_from_config(params, *args):
-        if len(args) < 2:
-            print "Invalid arguments!"
-            sys.exit(-1)
+def run_from_config(params, *args):
+    if len(args) < 2:
+        print "Invalid arguments!"
+        sys.exit(-1)
 
-        input_file = args[0]
-        test_file = args[1]
-        num_epochs = 1000
-        if len(args) > 2:
-            num_epochs = int(args[2])
-        params["D"] = 2 ** params["logD"]
-        params["conv_layer1_nfilters"] = 2 ** params["log_conv_layer1_nfilters"]
-        params["conv_layer2_nfilters"] = 2 ** params["log_conv_layer2_nfilters"]
+    input_file = args[0]
+    test_file = args[1]
+    num_epochs = 1000
+    if len(args) > 2:
+        num_epochs = int(args[2])
+    params["D"] = 2 ** params["logD"]
+    params["conv_layer1_nfilters"] = 2 ** params["log_conv_layer1_nfilters"]
+    params["conv_layer2_nfilters"] = 2 ** params["log_conv_layer2_nfilters"]
 
-        model = ConvolutionalAttentionalLearner(params)
-        model.train(input_file, max_epochs=num_epochs)
+    model = ConvolutionalAttentionalLearner(params)
+    model.train(input_file, max_epochs=num_epochs)
 
-        test_data, original_names = model.naming_data.conv_data(test_file, model.name_cx_size, model.padding_size)
-        test_name_targets, test_name_contexts, test_code_sentences, test_original_name_ids = test_data
-        ids, unique_idx = np.unique(test_original_name_ids, return_index=True)
+    test_data, original_names = model.naming_data.conv_data(test_file, model.name_cx_size, model.padding_size)
+    test_name_targets, test_name_contexts, test_code_sentences, test_original_name_ids = test_data
+    ids, unique_idx = np.unique(test_original_name_ids, return_index=True)
 
-        eval = F1Evaluator(model)
-        point_suggestion_eval = eval.compute_names(test_code_sentences[unique_idx], original_names,
-                                                      model2.naming_data.all_tokens_dictionary.get_all_names())
-        return -point_suggestion_eval.get_f1_at_all_ranks()[1]
+    eval = F1Evaluator(model)
+    point_suggestion_eval = eval.compute_names(test_code_sentences[unique_idx], original_names,
+                                                  model2.naming_data.all_tokens_dictionary.get_all_names())
+    return -point_suggestion_eval.get_f1_at_all_ranks()[1]
 
 if __name__ == '__main__':
     if len(sys.argv) < 5:
