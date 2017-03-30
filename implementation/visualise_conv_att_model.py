@@ -20,7 +20,7 @@ if __name__ == '__main__':
     for i in xrange(len(name_targets)):
         suggestion_data = {}
         suggestion_data["original_name"] = original_names[original_name_ids[i]]
-        suggestion_data["target_subtoken"] = learner.naming_data.all_tokens_dictionary.get_name_for_id(name_targets[i])
+        suggestion_data["target_subtoken"] = learner.naming_data.all_tokens_dictionary.token_from_id(name_targets[i])
         subtoken_probs = learner.model.log_prob(name_contexts[[i]], [code_sentences[i]])[0]
         suggestion_data["suggestions"] = {learner.naming_data.all_tokens_dictionary.get_name_for_id(j): np.exp(subtoken_probs[j]) for j in np.argsort(subtoken_probs)[-20:][::-1]}
         suggestion_data["att_vector"] = [p for p in learner.get_attention_vector(name_contexts[i], code_sentences[i])]
