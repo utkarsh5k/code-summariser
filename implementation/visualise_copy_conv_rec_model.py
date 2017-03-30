@@ -11,7 +11,7 @@ if __name__ == "__main__":
     learner = ConvolutionalCopyAttentionalRecurrentLearner.load(sys.argv[1])
     dataset = sys.argv[2]
 
-    data, original_names = learner.naming_data.rec_copy_conv_data(dataset, learner.padding_size)
+    data, original_names = learner.naming_data.data_in_rec_copy_conv_format(dataset, learner.padding_size)
     name_targets, code_sentences, code, target_is_unk, copy_vectors = data
 
     all_data = []

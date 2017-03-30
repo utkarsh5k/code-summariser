@@ -244,6 +244,7 @@ class FormatTokens:
     """
     looks similar to convolution data formatting, but it really isn't
     """
+    @staticmethod
     def rec_conv_data(self, names, code, sentence_padding):
         """
         data regularity and shape check
@@ -349,7 +350,6 @@ class FormatTokens:
     def data_in_rec_copy_conv_format(self, inp, min_code_size):
         names, code, original_names = self.__read_file(inp)
         return self.rec_copy_conv_data(names, code, min_code_size), original_names
-
 
     def rec_copy_conv_data(self, names, code, sentence_padding):
         """
