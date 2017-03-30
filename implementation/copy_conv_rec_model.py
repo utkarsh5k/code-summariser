@@ -156,7 +156,7 @@ class CopyConvolutionalRecurrentAttentionalModel(object):
         correct_answer_log_prob = self.model_objective(copy_probs[:-1], copy_weights[:-1], is_copy_matrix[1:], name_log_probs[:-1], name_targets[1:], targets_is_unk[1:])
 
         grad = T.grad(correct_answer_log_prob, self.train_parameters)
-        self.grad_accumulate = theano.function(inputs=[sentence, is_copy_matrix, targets_is_unk, name_targets], updates=[(v, v+g) for v, g in zip(grad_acc, grad)] + [(grad_acc[-1], grad_acc[-1]+1)], #mode='NanGuardMode')
+        self.grad_accumulate = theano.function(inputs=[sentence, is_copy_matrix, targets_is_unk, name_targets], updates=[(v, v+g) for v, g in zip(grad_acc, grad)] + [(grad_acc[-1], grad_acc[-1]+1)],) #mode='NanGuardMode')
 
         normalized_grads = [T.switch(grad_acc[-1] >0, g / grad_acc[-1], g) for g in grad_acc[:-1]]
         step_updates, ratios = nesterov_rmsprop_multiple(self.train_parameters, normalized_grads,
@@ -287,5 +287,3 @@ class CopyConvolutionalRecurrentAttentionalModel(object):
         use_model_prob = T.switch(targets_is_unk, -10, 0) + T.log(1. - copy_probs) + name_log_probs[T.arange(name_targets.shape[0]), name_targets]
         correct_answer_log_prob = logsumexp(use_copy_prob, use_model_prob)
         return T.mean(correct_answer_log_prob)
-
-

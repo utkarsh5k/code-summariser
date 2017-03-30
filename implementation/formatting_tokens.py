@@ -1,4 +1,4 @@
-from feature_set import feature_set
+from feature_set import FeatureSet
 import json
 from itertools import chain, repeat
 from collections import defaultdict
@@ -16,7 +16,7 @@ or rec copy conv
 
 class FormatTokens:
 
-	SUBTOKEN_START = "%START%"
+    SUBTOKEN_START = "%START%"
     SUBTOKEN_END = "%END%"
     NONE = "%NONE%"
 
@@ -395,7 +395,7 @@ class FormatTokens:
         """
         possible_suggestions_stack = [([self.NONE] * (name_cx_size - 1) + [self.SUBTOKEN_START], [], 0)]
         """
-        Keep the max_no_of_suggestions suggestion scores (sorted in the heap). 
+        Keep the max_no_of_suggestions suggestion scores (sorted in the heap).
         Prune further exploration if something has already lower score
         """
         prediction_probabilities_heap = [float('-inf')]
@@ -425,19 +425,19 @@ class FormatTokens:
                     continue
                 elif len(subword_tokens[1]) > max_predicted_id_size:
                     continue
-    
+
                 """
                 Convert subword context
                 """
                 context = [self.name_dictionary.is_id_or_is_unknown(k) for k in subword_tokens[0][-name_cx_size:]]
                 assert len(context) == name_cx_size
                 context = np.array([context], dtype=np.int32)
-    
+
                 """
                 Predict next subwords
                 """
                 target_subword_log_probabilities = next_name_log_probability(context)
-    
+
                 def list_possible_options(name_id):
                     subword_name = self.all_tokens_dictionary.token_from_id(name_id)
                     if subword_name == self.all_tokens_dictionary.get_unknown():
@@ -470,4 +470,3 @@ class FormatTokens:
         suggestions = [(identifier, np.exp(logprob)) for identifier, logprob in suggestions.items()]
         suggestions.sort(key=lambda entry: entry[1], reverse=True)
         return suggestions
-

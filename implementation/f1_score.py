@@ -178,16 +178,16 @@ def token_precision_recall(predicted_parts, target_parts):
     assert tp <= len(predicted_parts), (tp, len(predicted_parts))
     if len(predicted_parts) > 0:
         """ Predicted parts is basically true and false positives """
-       precision = float(tp) / len(predicted_parts)
+        precision = float(tp) / len(predicted_parts)
     else:
-       precision = 0
+        precision = 0
 
     assert tp <= len(target_parts), (tp, target_parts)
     if len(target_parts) > 0:
         """ Target tokens contain tp and misclassified fn """
-       recall = float(tp) / len(target_parts)
+        recall = float(tp) / len(target_parts)
     else:
-       recall = 0
+        recall = 0
 
     if precision + recall > 0:
         f1 = 2 * precision * recall / (precision + recall)
