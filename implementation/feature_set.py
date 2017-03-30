@@ -5,13 +5,13 @@ Feature representation, converting tokens to ids and ids to tokens
 """
 class FeatureSet:
 
-	def __init__(self):
-		self.id_to_token = {}
-		self.next_id = 0
-		self.token_to_id = {}
+    def __init__(self):
+        self.id_to_token = {}
+        self.next_id = 0
+        self.token_to_id = {}
         self.id_from_token(self.get_unknown())
 
-	def token_from_id(self, id):
+    def token_from_id(self, id):
         return self.id_to_token[id]
 
     def is_id_or_is_unknown(self, token):

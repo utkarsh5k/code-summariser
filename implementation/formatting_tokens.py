@@ -1,4 +1,4 @@
-from feature_set import feature_set
+from feature_set import FeatureSet
 import json
 from itertools import chain, repeat
 from collections import defaultdict
@@ -16,7 +16,7 @@ or rec copy conv
 
 class FormatTokens:
 
-	SUBTOKEN_START = "%START%"
+    SUBTOKEN_START = "%START%"
     SUBTOKEN_END = "%END%"
     NONE = "%NONE%"
 
@@ -27,6 +27,7 @@ class FormatTokens:
         self.all_tokens_dictionary.id_from_token(self.NONE)
         self.name_empirical_dist = self.__create_empirical_distribution(self.all_tokens_dictionary, chain.from_iterable(names))
 
+    @staticmethod
     def __read_file(inp):
         with open(inp, 'r') as f:
             data = json.load(f)
@@ -46,9 +47,11 @@ class FormatTokens:
 
         return names, code, original_names
 
+    @staticmethod
     def remove_id_tags(code):
         return filter(lambda x: x != "<id>" and x != "</id>", code)
 
+    @staticmethod
     def id_tags_only(self, code):
         tags_code = []
         for tokens in code:
@@ -67,6 +70,7 @@ class FormatTokens:
     """
     scaling parameter to be used for dirichlet stochastic process, value determined by previous work
     """
+    @staticmethod
     def __create_empirical_distribution(records_dict, records, alpha_dirichlet=10.):
     	targets = np.array([records_dict.is_id_or_is_unknown(token) for token in record])
     	"""
@@ -104,6 +108,7 @@ class FormatTokens:
         names, code, original_names = self.__read_file(inp)
         return self.__label_format(names, self.name_dictionary, names_cx_size), self.__label_format(code, self.all_tokens_dictionary, code_cx_size), original_names
 
+    @staticmethod
     def validated_label_data(inp, code_cx_size, names_cx_size, percent_train):
         """
         percentages cannot be less than 0 or greater than 1, can't believe this needs a check
@@ -160,6 +165,7 @@ class FormatTokens:
         original_names_ids = np.array(original_names_ids, dtype=np.int32)
         return name_targets, name_contexts, code_features, original_names_ids
 
+    @staticmethod
     def validated_forward_format_data(inp, names_cx_size, percent_train):
         """
         percentages cannot be less than 0 or greater than 1, can't believe this needs a check
@@ -217,6 +223,7 @@ class FormatTokens:
     """
     similar to the forward format data with validation method
     """
+    @staticmethod
     def validated_conv_data(inp, names_cx_size, percent_train, min_code_size):
         assert percent_train < 1
         assert percent_train > 0
@@ -262,6 +269,7 @@ class FormatTokens:
     this is similar to any of the previous validation methods written, for forward format and for
     convolution format
     """
+    @staticmethod
     def validated_rec_conv_data(inp, percent_train, min_code_size):
         assert percent_train < 1
         assert percent_train > 0
@@ -324,6 +332,7 @@ class FormatTokens:
         target_is_unknown = np.array(target_is_unknown, dtype=np.int32)
         return name_targets, original_targets, name_contexts, sentences, original_code, copy_vector, target_is_unknown, original_names_ids
 
+    @staticmethod
     def validated_copy_conv_data(inp, names_cx_size, percent_train, min_code_size):
         assert percent_train < 1
         assert percent_train > 0
@@ -371,6 +380,7 @@ class FormatTokens:
         copy_vectors = np.array(copy_vectors, dtype=np.object)
         return name_targets, sentences, code, target_is_unknown, copy_vectors
 
+    @staticmethod
     def validated_rec_copy_conv_data(inp, percent_train, min_code_size):
         assert percent_train < 1
         assert percent_train > 0
@@ -395,7 +405,7 @@ class FormatTokens:
         """
         possible_suggestions_stack = [([self.NONE] * (name_cx_size - 1) + [self.SUBTOKEN_START], [], 0)]
         """
-        Keep the max_no_of_suggestions suggestion scores (sorted in the heap). 
+        Keep the max_no_of_suggestions suggestion scores (sorted in the heap).
         Prune further exploration if something has already lower score
         """
         prediction_probabilities_heap = [float('-inf')]
@@ -425,19 +435,19 @@ class FormatTokens:
                     continue
                 elif len(subword_tokens[1]) > max_predicted_id_size:
                     continue
-    
+
                 """
                 Convert subword context
                 """
                 context = [self.name_dictionary.is_id_or_is_unknown(k) for k in subword_tokens[0][-name_cx_size:]]
                 assert len(context) == name_cx_size
                 context = np.array([context], dtype=np.int32)
-    
+
                 """
                 Predict next subwords
                 """
                 target_subword_log_probabilities = next_name_log_probability(context)
-    
+
                 def list_possible_options(name_id):
                     subword_name = self.all_tokens_dictionary.token_from_id(name_id)
                     if subword_name == self.all_tokens_dictionary.get_unknown():
@@ -470,4 +480,3 @@ class FormatTokens:
         suggestions = [(identifier, np.exp(logprob)) for identifier, logprob in suggestions.items()]
         suggestions.sort(key=lambda entry: entry[1], reverse=True)
         return suggestions
-
