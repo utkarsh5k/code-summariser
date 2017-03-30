@@ -3,3 +3,4 @@ Data
 Backup_Data
 json/
 *.pyc
+*.pkl

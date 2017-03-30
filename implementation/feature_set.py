@@ -31,6 +31,7 @@ class FeatureSet:
     def is_unknown(self, token):
         return token not in self.token_to_id
 
+    @staticmethod
     def get_unknown():
         return "%UNK%"
 
@@ -51,6 +52,7 @@ class FeatureSet:
         """
         return frozenset(self.token_to_id.keys())
 
+    @staticmethod
     def make_feature_set(tokens, min_occurences=20):
         """
         Counter subclass needed to count hashable objects (json/dictionary being built for tokens)

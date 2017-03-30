@@ -72,7 +72,7 @@ class FormatTokens:
     """
     @staticmethod
     def __create_empirical_distribution(records_dict, records, alpha_dirichlet=10.):
-    	targets = np.array([records_dict.is_id_or_is_unknown(token) for token in record])
+    	targets = np.array([records_dict.is_id_or_is_unknown(token) for token in records])
     	"""
     	number of occurences of each value in non-negative integer array
     	"""
@@ -347,8 +347,9 @@ class FormatTokens:
                 naming.copy_conv_data(names[idxs[lim:]], code[idxs[lim:]], names_cx_size, min_code_size), naming
 
     def data_in_rec_copy_conv_format(self, inp, min_code_size):
-        names, code, original_names = self.__get_file_data(inp)
+        names, code, original_names = self.__read_file(inp)
         return self.rec_copy_conv_data(names, code, min_code_size), original_names
+
 
     def rec_copy_conv_data(self, names, code, sentence_padding):
         """

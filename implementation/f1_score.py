@@ -22,7 +22,7 @@ class F1Evaluator:
             is_correct = [','.join(suggestion[0]) == targets[i] for suggestion in result]
             #out of vocabulary suggestion
             is_unkd = [is_unk(''.join(suggestion[0])) for suggestion in result]
-            unk_word_accuracy = [self.unk_acc(suggestion[0], targets[i].split(','), token_dictionary) for suggestion in result]
+            unk_word_accuracy = [self.unk_acc(suggestion[0], targets[i].split(','), token_dict) for suggestion in result]
             # precision and recall for the suggestions
             precision_recall = [token_precision_recall(suggestion[0], targets[i].split(',')) for suggestion in result]
             #combine metrics to form a single result
@@ -75,7 +75,7 @@ class PointSuggestionEvaluator:
         for i in xrange(len(self.confidence_threshold)):
             #take the suggestions with a higher threshold value
             num_confident_suggestions = confidence[confidence >= self.confidence_threshold[i]].shape[0]
-            for j in xrange(len(rank_to_eval)):
+            for j in xrange(len(self.rank_to_eval)):
                 rank = self.rank_to_eval[j]
                 n_suggestions = min(rank, num_confident_suggestions)
                 unk_at_rank = np.where(is_unk[:n_suggestions])[0]
@@ -106,7 +106,7 @@ class PointSuggestionEvaluator:
         for suggestion in suggestions_pr_re_f1:
             if suggestion[2] > max_f1:
                 max_pr, max_re, max_f1 = suggestion
-        return max_pr, max_re, mx_f1
+        return max_pr, max_re, max_f1
 
     def __str__(self):
         n_made_suggestions = np.array(self.num_made_suggestions, dtype = float)

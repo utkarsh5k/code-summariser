@@ -29,6 +29,7 @@ class ConvolutionalCopyAttentionalRecurrentLearner:
             cPickle.dump(self, f, cPickle.HIGHEST_PROTOCOL)
         self.model = model_tmp
 
+    @staticmethod
     def load(filename):
         with open(filename, 'rb') as f:
             learner = cPickle.load(f)
@@ -41,7 +42,7 @@ class ConvolutionalCopyAttentionalRecurrentLearner:
         print "saving best result %s"%("copy_convolutional_att_rec_model" + os.path.basename(self.hyperparameters["train_file"]) + ".pkl")
         print "Extracting data"
 
-        train_data, validation_data, self.naming_data = FormatTokens.rec_copy_conv_data(input_file, .92, self.padding_size)
+        train_data, validation_data, self.naming_data = FormatTokens.validated_rec_copy_conv_data(input_file, .92, self.padding_size)
         train_name_targets, train_code_sentences, train_code, train_target_is_unk, train_copy_vectors = train_data
         val_name_targets, val_code_sentences, val_code, val_target_is_unk, val_copy_vectors = validation_data
 
@@ -155,7 +156,7 @@ class ConvolutionalCopyAttentionalRecurrentLearner:
         """
         possible_suggestions_stack = [([self.naming_data.SUBTOKEN_START], [], 0)]
         """
-        Keep the max_no_of_suggestions suggestion scores (sorted in the heap). 
+        Keep the max_no_of_suggestions suggestion scores (sorted in the heap).
         Prune further exploration if something has already lower score
         """
         predictions_probs_heap = [float('-inf')]
@@ -305,6 +306,3 @@ if __name__ == "__main__":
         results = point_suggestion_eval.get_f1_at_all_ranks()
         print results
         experiment_log.record_results({"f1_at_rank1": results[0], "f1_at_rank5":results[1]})
-
-
-    
