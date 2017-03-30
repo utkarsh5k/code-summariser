@@ -11,7 +11,7 @@ if __name__ == '__main__':
     learner = ConvolutionalAttentionalLearner.load(sys.argv[1])
     dataset = sys.argv[2]
 
-    data, original_names = learner.naming_data.conv_data(dataset, learner.name_cx_size, learner.padding_size)
+    data, original_names = learner.naming_data.data_in_conv_format(dataset, learner.name_cx_size, learner.padding_size)
     name_targets, name_contexts, code_sentences, original_name_ids = data
 
     assert len(name_targets) == len(original_name_ids) == len(code_sentences)
