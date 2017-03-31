@@ -22,9 +22,9 @@ if __name__ == '__main__':
         suggestion_data["original_name"] = original_names[original_name_ids[i]]
         suggestion_data["target_subtoken"] = learner.naming_data.all_tokens_dictionary.token_from_id(name_targets[i])
         subtoken_probs = learner.model.log_prob(name_contexts[[i]], [code_sentences[i]])[0]
-        suggestion_data["suggestions"] = {learner.naming_data.all_tokens_dictionary.get_name_for_id(j): np.exp(subtoken_probs[j]) for j in np.argsort(subtoken_probs)[-20:][::-1]}
+        suggestion_data["suggestions"] = {learner.naming_data.all_tokens_dictionary.token_from_id(j): np.exp(subtoken_probs[j]) for j in np.argsort(subtoken_probs)[-20:][::-1]}
         suggestion_data["att_vector"] = [p for p in learner.get_attention_vector(name_contexts[i], code_sentences[i])]
-        suggestion_data["tokens"] = [learner.naming_data.all_tokens_dictionary.get_name_for_id(c) for c in code_sentences[i]][learner.padding_size/2: -learner.padding_size/2]
+        suggestion_data["tokens"] = [learner.naming_data.all_tokens_dictionary.token_from_id(sentence) for sentence in code_sentences[i]][learner.padding_size/2: -learner.padding_size/2]
         all_data.append(suggestion_data)
 
     with open(sys.argv[3], 'w') as f:

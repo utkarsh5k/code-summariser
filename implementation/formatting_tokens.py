@@ -244,7 +244,6 @@ class FormatTokens:
     """
     looks similar to convolution data formatting, but it really isn't
     """
-    @staticmethod
     def rec_conv_data(self, names, code, sentence_padding):
         """
         data regularity and shape check
